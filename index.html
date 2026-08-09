@@ -11,8 +11,11 @@
     * { box-sizing:border-box; }
     body { margin:0; min-width:320px; min-height:100vh; background:var(--wash); color:var(--ink); }
     button,input { font:inherit; } button { cursor:pointer; } button:disabled { opacity:.45; cursor:not-allowed; }
-    header { height:64px; padding:0 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); background:var(--paper); }
+    header { min-height:64px; padding:10px 24px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line); background:var(--paper); }
     .brand { font-size:21px; font-weight:850; } .beta { margin-left:8px; padding:3px 6px; color:white; background:var(--coral); border-radius:3px; font-size:10px; vertical-align:middle; }
+    .header-actions { display:flex; align-items:center; gap:14px; }
+    .donate { min-height:36px; padding:0 13px; display:inline-flex; align-items:center; border-radius:5px; background:#ffd140; color:#172c69; text-decoration:none; font-size:13px; font-weight:850; }
+    .donate:hover { background:#f4c52f; }
     #connection { color:var(--green); font-size:13px; font-weight:700; } #connection.offline { color:var(--coral); }
     main { width:min(1160px,100%); margin:auto; padding:34px 24px 50px; }
     [hidden] { display:none!important; } h1 { margin:0 0 10px; font-size:clamp(32px,5vw,52px); line-height:1.02; letter-spacing:0; } h2 { margin:0; font-size:20px; } p { color:var(--muted); line-height:1.55; }
@@ -27,6 +30,8 @@
     .how { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); background:white; }
     .step { min-height:210px; padding:22px; } .step+.step { border-left:1px solid var(--line); } .number { color:var(--coral); font-size:12px; font-weight:900; } .step h2 { margin:38px 0 8px; }
     .error { min-height:24px; margin-top:12px; color:var(--coral); font-weight:700; }
+    .support { margin-top:28px; padding:16px 18px; border-left:4px solid var(--coral); background:white; }
+    .support strong { display:block; margin-bottom:3px; } .support p { margin:0; font-size:14px; }
     .signin { min-height:48px; display:flex; align-items:center; margin-bottom:16px; }
     .profile { min-height:58px; display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:8px; border:1px solid var(--line); background:white; }
     .profile img { width:40px; height:40px; border-radius:50%; } .profile strong,.profile span { display:block; } .profile span { color:var(--muted); font-size:12px; }
@@ -48,7 +53,7 @@
   </style>
 </head>
 <body>
-  <header><div class="brand">Drawmatch <span class="beta">BETA</span></div><div id="connection">Connected</div></header>
+  <header><div class="brand">Drawmatch <span class="beta">BETA</span></div><div class="header-actions"><div id="connection">Connected</div><a class="donate" href="https://paypal.me/drawmatch" target="_blank" rel="noopener noreferrer">Donate</a></div></header>
   <main>
     <section id="joinView">
       <h1>Draw together.<br>Decide together.</h1><p>Two artists, one prompt, and one judge. Join from separate browsers and let matchmaking handle the rest.</p>
@@ -57,6 +62,7 @@
           <label>PLAYER ACCOUNT</label><div id="googleSignin" class="signin"></div><div id="profile" class="profile" hidden><img id="profileImage" alt=""><div><strong id="profileName"></strong><span id="profileEmail"></span></div></div>
           <div class="roles"><button id="artistRole" type="button" class="active">Artist</button><button id="judgeRole" type="button">Judge</button></div>
           <button id="joinButton" class="primary" type="submit" disabled>Join matchmaking</button><div id="joinError" class="error"></div>
+          <aside class="support"><strong>Help keep Drawmatch alive.</strong><p>Donations help cover hosting and give us more room to keep building.</p></aside>
         </form>
         <div class="how"><div class="step"><div class="number">01</div><h2>Queue</h2><p>Choose artist or judge.</p></div><div class="step"><div class="number">02</div><h2>Create</h2><p>Artists draw the same prompt.</p></div><div class="step"><div class="number">03</div><h2>Decide</h2><p>The judge chooses anonymously.</p></div></div>
       </div>
