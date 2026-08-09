@@ -7,6 +7,7 @@ import json
 import os
 import random
 import secrets
+import string
 import threading
 import time
 from collections import deque
@@ -41,8 +42,13 @@ class GameStore:
         self.lock = threading.RLock()
         self.players: dict[str, dict] = {}
         self.matches: dict[str, dict] = {}
-        self.artist_queue: deque[str] = deque()
-        self.judge_queue: deque[str] = deque()
+        self.rooms: dict[str, dict] = {}
+        self.queues = {
+            (mode, artist_count, role): deque()
+            for mode in ("prompted", "promptless")
+            for artist_count in (2, 4)
+            for role in ("artist", "judge")
+        }
         self.auth_sessions: dict[str, dict] = {}
 
     def authenticate(self, credential: str) -> dict:
@@ -71,9 +77,10 @@ class GameStore:
         }
         return {"auth_token": auth_token, "profile": self.auth_sessions[auth_token]}
 
-    def join(self, auth_token: str, role: str) -> dict:
+    def join(self, auth_token: str, role: str, mode: str, artist_count: int) -> dict:
         if role not in {"artist", "judge"}:
             raise ValueError("Choose artist or judge.")
+        self._validate_role_mode(role, mode, artist_count)
 
         with self.lock:
             profile = self.auth_sessions.get(auth_token)
@@ -94,27 +101,77 @@ class GameStore:
                 "picture": profile["picture"],
                 "google_sub": profile["sub"],
                 "role": role,
+                "mode": mode,
+                "artist_count": artist_count,
                 "status": "queued",
                 "match_id": None,
             }
-            self._queue_for(role).append(player_id)
+            self._queue_for(role, mode, artist_count).append(player_id)
             self._make_matches()
             return {"player_id": player_id}
+
+    def create_room(
+        self, auth_token: str, role: str, mode: str, artist_count: int
+    ) -> dict:
+        with self.lock:
+            self._validate_role_mode(role, mode, artist_count)
+            code = self._new_room_code()
+            self.rooms[code] = {
+                "code": code,
+                "mode": mode,
+                "artist_count": artist_count,
+                "status": "waiting",
+                "artists": [],
+                "judge": None,
+            }
+            player_id = self._add_room_player(auth_token, self.rooms[code], role)
+            return {"player_id": player_id, "room_code": code}
+
+    def join_room(self, auth_token: str, code: str, role: str) -> dict:
+        with self.lock:
+            code = code.strip().upper()
+            room = self.rooms.get(code)
+            if room is None or room["status"] != "waiting":
+                raise ValueError("Private room not found or already playing.")
+            player_id = self._add_room_player(auth_token, room, role)
+            return {"player_id": player_id, "room_code": code}
 
     def state(self, player_id: str) -> dict:
         with self.lock:
             player = self._player(player_id)
             if player["status"] == "queued":
-                queue = self._queue_for(player["role"])
+                queue = self._queue_for(
+                    player["role"], player["mode"], player["artist_count"]
+                )
                 position = list(queue).index(player_id) + 1
                 return {
                     "status": "queued",
                     "role": player["role"],
+                    "mode": player["mode"],
+                    "artist_count": player["artist_count"],
                     "name": player["name"],
                     "picture": player["picture"],
                     "position": position,
-                    "artists_waiting": len(self.artist_queue),
-                    "judges_waiting": len(self.judge_queue),
+                    "artists_waiting": len(
+                        self._queue_for("artist", player["mode"], player["artist_count"])
+                    ),
+                    "judges_waiting": len(
+                        self._queue_for("judge", player["mode"], player["artist_count"])
+                    ),
+                }
+
+            if player["status"] == "room":
+                room = self.rooms[player["room_code"]]
+                return {
+                    "status": "room",
+                    "role": player["role"],
+                    "mode": player["mode"],
+                    "artist_count": room["artist_count"],
+                    "name": player["name"],
+                    "picture": player["picture"],
+                    "room_code": room["code"],
+                    "artists_waiting": len(room["artists"]),
+                    "judges_waiting": 1 if room["judge"] else 0,
                 }
 
             if player["status"] == "left":
@@ -124,6 +181,8 @@ class GameStore:
             response = {
                 "status": match["status"],
                 "role": player["role"],
+                "mode": match["mode"],
+                "artist_count": match["artist_count"],
                 "name": player["name"],
                 "picture": player["picture"],
                 "prompt": match["prompt"],
@@ -165,7 +224,7 @@ class GameStore:
             if player["role"] != "judge" or not player["match_id"]:
                 raise ValueError("Only the match judge can vote.")
             match = self.matches[player["match_id"]]
-            if match["status"] != "judging" or choice not in {0, 1}:
+            if match["status"] != "judging" or choice not in range(len(match["artists"])):
                 raise ValueError("That vote is not available.")
             match["winner"] = match["artists"][choice]
             match["status"] = "complete"
@@ -175,20 +234,38 @@ class GameStore:
             player = self._player(player_id)
             if player["status"] == "queued":
                 return
+            previous_match = self.matches.get(player.get("match_id"))
             player["status"] = "queued"
             player["match_id"] = None
-            self._queue_for(player["role"]).append(player_id)
-            self._make_matches()
+            if previous_match and previous_match.get("room_code"):
+                room = self.rooms[previous_match["room_code"]]
+                if room["status"] != "waiting":
+                    room.update(status="waiting", artists=[], judge=None)
+                player["status"] = "room"
+                player["room_code"] = room["code"]
+                self._seat_player(room, player_id, player["role"])
+                self._start_room_if_ready(room)
+            else:
+                self._queue_for(
+                    player["role"], player["mode"], player["artist_count"]
+                ).append(player_id)
+                self._make_matches()
 
     def leave(self, player_id: str) -> None:
         with self.lock:
             player = self._player(player_id)
             if player["status"] == "queued":
-                queue = self._queue_for(player["role"])
+                queue = self._queue_for(
+                    player["role"], player["mode"], player["artist_count"]
+                )
                 try:
                     queue.remove(player_id)
                 except ValueError:
                     pass
+            elif player["status"] == "room":
+                room = self.rooms.get(player["room_code"])
+                if room:
+                    self._unseat_player(room, player_id)
             player["status"] = "left"
 
     def expire_rounds(self) -> None:
@@ -202,7 +279,7 @@ class GameStore:
                 for artist in match["artists"]:
                     if artist not in match["drawings"] and blank:
                         match["drawings"][artist] = blank
-                if len(match["drawings"]) == 2:
+                if len(match["drawings"]) == len(match["artists"]):
                     match["status"] = "judging"
 
     def set_blank(self, player_id: str, drawing: str) -> None:
@@ -212,27 +289,119 @@ class GameStore:
                 self.matches[player["match_id"]]["blank_drawing"] = drawing
 
     def _make_matches(self) -> None:
-        while len(self.artist_queue) >= 2 and self.judge_queue:
-            artists = [self.artist_queue.popleft(), self.artist_queue.popleft()]
-            judge = self.judge_queue.popleft()
-            match_id = secrets.token_urlsafe(12)
-            self.matches[match_id] = {
-                "id": match_id,
-                "artists": artists,
-                "judge": judge,
-                "prompt": random.choice(PROMPTS),
-                "deadline": time.time() + ROUND_SECONDS,
-                "status": "drawing",
-                "drawings": {},
-                "winner": None,
-                "blank_drawing": None,
-            }
-            for player_id in [*artists, judge]:
-                self.players[player_id]["status"] = "matched"
-                self.players[player_id]["match_id"] = match_id
+        for mode in ("prompted", "promptless"):
+            for artist_count in (2, 4):
+                artists_queue = self._queue_for("artist", mode, artist_count)
+                judges_queue = self._queue_for("judge", mode, artist_count)
+                while len(artists_queue) >= artist_count and judges_queue:
+                    artists = [artists_queue.popleft() for _ in range(artist_count)]
+                    judge = judges_queue.popleft()
+                    match_id = secrets.token_urlsafe(12)
+                    self.matches[match_id] = {
+                        "id": match_id,
+                        "artists": artists,
+                        "artist_count": artist_count,
+                        "judge": judge,
+                        "mode": mode,
+                        "prompt": random.choice(PROMPTS) if mode == "prompted" else "",
+                        "deadline": time.time() + ROUND_SECONDS,
+                        "status": "drawing",
+                        "drawings": {},
+                        "winner": None,
+                        "blank_drawing": None,
+                    }
+                    for player_id in [*artists, judge]:
+                        self.players[player_id]["status"] = "matched"
+                        self.players[player_id]["match_id"] = match_id
 
-    def _queue_for(self, role: str) -> deque[str]:
-        return self.artist_queue if role == "artist" else self.judge_queue
+    def _add_room_player(self, auth_token: str, room: dict, role: str) -> str:
+        if role not in {"artist", "judge"}:
+            raise ValueError("Choose artist or judge.")
+        profile = self.auth_sessions.get(auth_token)
+        if profile is None:
+            raise ValueError("Sign in with Google before joining.")
+        if any(
+            player["google_sub"] == profile["sub"] and player["status"] != "left"
+            for player in self.players.values()
+        ):
+            raise ValueError("This Google account is already queued or playing.")
+        if role == "artist" and len(room["artists"]) >= room["artist_count"]:
+            raise ValueError("This room already has all of its artists.")
+        if role == "judge" and room["judge"] is not None:
+            raise ValueError("This room already has a judge.")
+
+        player_id = secrets.token_urlsafe(18)
+        self.players[player_id] = {
+            "id": player_id,
+            "name": profile["name"],
+            "picture": profile["picture"],
+            "google_sub": profile["sub"],
+            "role": role,
+            "mode": room["mode"],
+            "artist_count": room["artist_count"],
+            "status": "room",
+            "room_code": room["code"],
+            "match_id": None,
+        }
+        self._seat_player(room, player_id, role)
+        self._start_room_if_ready(room)
+        return player_id
+
+    @staticmethod
+    def _seat_player(room: dict, player_id: str, role: str) -> None:
+        if role == "artist":
+            room["artists"].append(player_id)
+        else:
+            room["judge"] = player_id
+
+    @staticmethod
+    def _unseat_player(room: dict, player_id: str) -> None:
+        if player_id in room["artists"]:
+            room["artists"].remove(player_id)
+        elif room["judge"] == player_id:
+            room["judge"] = None
+
+    def _start_room_if_ready(self, room: dict) -> None:
+        if len(room["artists"]) != room["artist_count"] or room["judge"] is None:
+            return
+        match_id = secrets.token_urlsafe(12)
+        self.matches[match_id] = {
+            "id": match_id,
+            "artists": list(room["artists"]),
+            "artist_count": room["artist_count"],
+            "judge": room["judge"],
+            "mode": room["mode"],
+            "prompt": random.choice(PROMPTS) if room["mode"] == "prompted" else "",
+            "deadline": time.time() + ROUND_SECONDS,
+            "status": "drawing",
+            "drawings": {},
+            "winner": None,
+            "blank_drawing": None,
+            "room_code": room["code"],
+        }
+        room["status"] = "playing"
+        for player_id in [*room["artists"], room["judge"]]:
+            self.players[player_id]["status"] = "matched"
+            self.players[player_id]["match_id"] = match_id
+
+    def _new_room_code(self) -> str:
+        alphabet = string.ascii_uppercase.replace("I", "").replace("O", "") + "23456789"
+        while True:
+            code = "".join(secrets.choice(alphabet) for _ in range(6))
+            if code not in self.rooms:
+                return code
+
+    @staticmethod
+    def _validate_role_mode(role: str, mode: str, artist_count: int) -> None:
+        if role not in {"artist", "judge"}:
+            raise ValueError("Choose artist or judge.")
+        if mode not in {"prompted", "promptless"}:
+            raise ValueError("Choose prompted or promptless.")
+        if artist_count not in {2, 4}:
+            raise ValueError("Choose two or four artists.")
+
+    def _queue_for(self, role: str, mode: str, artist_count: int) -> deque[str]:
+        return self.queues[(mode, artist_count, role)]
 
     def _player(self, player_id: str) -> dict:
         try:
@@ -266,6 +435,8 @@ class Handler(SimpleHTTPRequestHandler):
         routes = {
             "/api/auth/google": self._auth_google,
             "/api/join": self._join,
+            "/api/room/create": self._create_room,
+            "/api/room/join": self._join_room,
             "/api/submit": self._submit,
             "/api/vote": self._vote,
             "/api/requeue": self._requeue,
@@ -280,10 +451,30 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _join(self) -> dict:
         body = self._body()
-        return STORE.join(body.get("auth_token", ""), body.get("role", ""))
+        return STORE.join(
+            body.get("auth_token", ""),
+            body.get("role", ""),
+            body.get("mode", ""),
+            body.get("artist_count"),
+        )
 
     def _auth_google(self) -> dict:
         return STORE.authenticate(self._body().get("credential", ""))
+
+    def _create_room(self) -> dict:
+        body = self._body()
+        return STORE.create_room(
+            body.get("auth_token", ""),
+            body.get("role", ""),
+            body.get("mode", ""),
+            body.get("artist_count"),
+        )
+
+    def _join_room(self) -> dict:
+        body = self._body()
+        return STORE.join_room(
+            body.get("auth_token", ""), body.get("room_code", ""), body.get("role", "")
+        )
 
     def _submit(self) -> dict:
         body = self._body()

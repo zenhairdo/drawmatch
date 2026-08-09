@@ -30,6 +30,8 @@
     .how { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); background:white; }
     .step { min-height:210px; padding:22px; } .step+.step { border-left:1px solid var(--line); } .number { color:var(--coral); font-size:12px; font-weight:900; } .step h2 { margin:38px 0 8px; }
     .error { min-height:24px; margin-top:12px; color:var(--coral); font-weight:700; }
+    .private-room { display:grid; grid-template-columns:1fr auto auto; gap:8px; margin-top:14px; }
+    .private-room input { min-width:0; text-transform:uppercase; letter-spacing:2px; font-weight:800; }
     .support { margin-top:28px; padding:16px 18px; border-left:4px solid var(--coral); background:white; }
     .support strong { display:block; margin-bottom:3px; } .support p { margin:0; font-size:14px; }
     .signin { min-height:48px; display:flex; align-items:center; margin-bottom:16px; }
@@ -56,11 +58,15 @@
   <header><div class="brand">Drawmatch <span class="beta">BETA</span></div><div class="header-actions"><div id="connection">Connected</div><a class="donate" href="https://paypal.me/drawmatch" target="_blank" rel="noopener noreferrer">Donate</a></div></header>
   <main>
     <section id="joinView">
-      <h1>Draw together.<br>Decide together.</h1><p>Two artists, one prompt, and one judge. Join from separate browsers and let matchmaking handle the rest.</p>
+      <h1>Draw together.<br>Decide together.</h1><p>Two or four artists, one judge, and a shared round. Join from separate browsers and let matchmaking handle the rest.</p>
       <div class="join">
         <form id="joinForm" class="join-form">
           <label>PLAYER ACCOUNT</label><div id="googleSignin" class="signin"></div><div id="profile" class="profile" hidden><img id="profileImage" alt=""><div><strong id="profileName"></strong><span id="profileEmail"></span></div></div>
           <div class="roles"><button id="artistRole" type="button" class="active">Artist</button><button id="judgeRole" type="button">Judge</button></div>
+          <label>ROUND MODE</label><div class="roles"><button id="promptedMode" type="button" class="active">Prompted</button><button id="promptlessMode" type="button">Promptless</button></div>
+          <label>ARTISTS PER MATCH</label><div class="roles"><button id="twoArtists" type="button" class="active">2 Artists</button><button id="fourArtists" type="button">4 Artists</button></div>
+          <label>MATCH TYPE</label><div class="roles"><button id="publicMatch" type="button" class="active">Public queue</button><button id="privateMatch" type="button">Private room</button></div>
+          <div id="privateRoom" class="private-room" hidden><input id="roomCode" type="text" maxlength="6" placeholder="ROOM CODE" aria-label="Private room code"><button id="joinRoom" class="secondary" type="submit" disabled>Join</button><button id="createRoom" class="secondary" type="button" disabled>Create</button></div>
           <button id="joinButton" class="primary" type="submit" disabled>Join matchmaking</button><div id="joinError" class="error"></div>
           <aside class="support"><strong>Help keep Drawmatch alive.</strong><p>Donations help cover hosting and give us more room to keep building.</p></aside>
         </form>
@@ -85,37 +91,46 @@
 
   <script>
     const views=["joinView","queueView","drawView","waitView","judgeWaitView","judgeView","resultView"], $=id=>document.getElementById(id);
-    const state={role:"artist",playerId:sessionStorage.getItem("drawmatchPlayer"),authToken:sessionStorage.getItem("drawmatchAuth"),profile:JSON.parse(sessionStorage.getItem("drawmatchProfile")||"null"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false};
+    const state={role:"artist",mode:"prompted",artistCount:2,matchType:"public",playerId:sessionStorage.getItem("drawmatchPlayer"),authToken:sessionStorage.getItem("drawmatchAuth"),profile:JSON.parse(sessionStorage.getItem("drawmatchProfile")||"null"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false};
     const canvas=$("canvas"),ctx=canvas.getContext("2d");
     function show(id){views.forEach(view=>$(view).hidden=view!==id)}
     function role(role){state.role=role;$("artistRole").classList.toggle("active",role==="artist");$("judgeRole").classList.toggle("active",role==="judge")}
+    function mode(mode){state.mode=mode;$("promptedMode").classList.toggle("active",mode==="prompted");$("promptlessMode").classList.toggle("active",mode==="promptless")}
+    function artistCount(count){state.artistCount=count;$("twoArtists").classList.toggle("active",count===2);$("fourArtists").classList.toggle("active",count===4)}
+    function matchType(type){state.matchType=type;$("publicMatch").classList.toggle("active",type==="public");$("privateMatch").classList.toggle("active",type==="private");$("privateRoom").hidden=type!=="private";$("joinButton").hidden=type==="private"}
     async function api(path,body){const options=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
     async function initializeGoogle(){try{const config=await api("/api/config");while(!window.google)await new Promise(resolve=>setTimeout(resolve,50));google.accounts.id.initialize({client_id:config.google_client_id,callback:handleGoogleCredential});google.accounts.id.renderButton($("googleSignin"),{type:"standard",theme:"outline",size:"large",text:"signin_with",shape:"rectangular",width:300})}catch(error){$("joinError").textContent="Could not load Google sign-in."}}
     async function handleGoogleCredential(response){$("joinError").textContent="";try{const data=await api("/api/auth/google",{credential:response.credential});state.authToken=data.auth_token;state.profile=data.profile;sessionStorage.setItem("drawmatchAuth",state.authToken);sessionStorage.setItem("drawmatchProfile",JSON.stringify(state.profile));renderProfile()}catch(error){$("joinError").textContent=error.message}}
-    function renderProfile(){const signedIn=Boolean(state.profile&&state.authToken);$("profile").hidden=!signedIn;$("googleSignin").hidden=signedIn;$("joinButton").disabled=!signedIn;if(signedIn){$("profileImage").src=state.profile.picture||"";$("profileImage").hidden=!state.profile.picture;$("profileName").textContent=state.profile.name;$("profileEmail").textContent=state.profile.email}}
+    function renderProfile(){const signedIn=Boolean(state.profile&&state.authToken);$("profile").hidden=!signedIn;$("googleSignin").hidden=signedIn;$("joinButton").disabled=!signedIn;$("joinRoom").disabled=!signedIn;$("createRoom").disabled=!signedIn;if(signedIn){$("profileImage").src=state.profile.picture||"";$("profileImage").hidden=!state.profile.picture;$("profileName").textContent=state.profile.name;$("profileEmail").textContent=state.profile.email}}
     function setConnection(ok){$("connection").textContent=ok?"Connected":"Reconnecting…";$("connection").classList.toggle("offline",!ok)}
     function startPolling(){clearInterval(state.poll);poll();state.poll=setInterval(poll,800)}
     async function poll(){if(!state.playerId)return;try{const data=await api(`/api/state?player_id=${encodeURIComponent(state.playerId)}`);setConnection(true);renderState(data)}catch(error){if(error.message==="Player session not found."){setConnection(true);resetSession()}else{setConnection(false)}}}
     function renderState(data){
-      if(data.status==="queued"){show("queueView");$("queueIcon").textContent=data.role==="artist"?"A":"J";$("queueIcon").classList.toggle("judge",data.role==="judge");$("queueCopy").textContent=`${data.name}, you are number ${data.position} in the ${data.role} queue.`;$("artistsWaiting").textContent=data.artists_waiting;$("judgesWaiting").textContent=data.judges_waiting}
+      if(data.status==="queued"){show("queueView");$("queueIcon").textContent=data.role==="artist"?"A":"J";$("queueIcon").classList.toggle("judge",data.role==="judge");$("queueCopy").textContent=`${data.name}, you are number ${data.position} in the ${data.mode} ${data.artist_count}-artist ${data.role} queue.`;$("artistsWaiting").textContent=data.artists_waiting;$("judgesWaiting").textContent=data.judges_waiting}
+      else if(data.status==="room"){show("queueView");$("queueIcon").textContent=data.role==="artist"?"A":"J";$("queueIcon").classList.toggle("judge",data.role==="judge");$("queueCopy").textContent=`Private room ${data.room_code} · Share this code with your players.`;$("artistsWaiting").textContent=data.artists_waiting;$("judgesWaiting").textContent=data.judges_waiting}
       else if(data.status==="drawing"&&data.role==="artist"&&!data.submitted){if(state.lastStatus!=="drawing")beginRound(data);updateTimer(data.deadline)}
       else if(data.status==="drawing"&&data.role==="artist"){show("waitView");$("waitCopy").textContent=data.opponent_submitted?"Both drawings are in. Preparing the judge’s view…":"Waiting for the other artist to submit."}
-      else if(data.status==="drawing"&&data.role==="judge"){show("judgeWaitView");$("judgeWaitPrompt").textContent=data.prompt;$("judgeWaitCopy").textContent="You’ll receive both drawings as soon as they are submitted.";updateTimer(data.deadline)}
+      else if(data.status==="drawing"&&data.role==="judge"){show("judgeWaitView");$("judgeWaitPrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;$("judgeWaitCopy").textContent="You’ll receive both drawings as soon as they are submitted.";updateTimer(data.deadline)}
       else if(data.status==="judging"&&data.role==="judge")renderJudging(data)
       else if(data.status==="judging"){show("waitView");$("waitTitle").textContent="The judge is deciding";$("waitCopy").textContent="Both drawings are anonymous until the vote is locked."}
       else if(data.status==="complete")renderResult(data);else if(data.status==="left"){resetSession()}
       state.lastStatus=data.status;
     }
-    function beginRound(data){show("drawView");$("drawPrompt").textContent=data.prompt;state.strokes=[];state.submitted=false;redraw();api("/api/blank",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")}).catch(()=>{})}
+    function beginRound(data){show("drawView");$("drawPrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;state.strokes=[];state.submitted=false;redraw();api("/api/blank",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")}).catch(()=>{})}
     function updateTimer(deadline){const seconds=Math.max(0,Math.ceil(deadline-Date.now()/1000)),m=String(Math.floor(seconds/60)).padStart(2,"0"),s=String(seconds%60).padStart(2,"0");$("timer").textContent=`${m}:${s}`;$("timer").classList.toggle("warning",seconds<=10)}
     function point(event){const rect=canvas.getBoundingClientRect();return{x:(event.clientX-rect.left)*canvas.width/rect.width,y:(event.clientY-rect.top)*canvas.height/rect.height}}
     function redraw(){ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.lineCap="round";ctx.lineJoin="round";state.strokes.forEach(stroke=>{ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.size;ctx.beginPath();ctx.moveTo(stroke.points[0].x,stroke.points[0].y);stroke.points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(stroke.points.length===1)ctx.lineTo(stroke.points[0].x+.01,stroke.points[0].y+.01);ctx.stroke()})}
-    function renderJudging(data){if(state.lastStatus==="judging")return;show("judgeView");$("judgePrompt").textContent=data.prompt;$("judgeDrawings").innerHTML=data.drawings.map((image,index)=>`<button class="submission" data-vote="${index}"><img src="${image}" alt="Anonymous drawing ${index+1}"><span>Choose drawing ${index+1}</span></button>`).join("");document.querySelectorAll("[data-vote]").forEach(button=>button.onclick=async()=>{button.disabled=true;await api("/api/vote",{player_id:state.playerId,choice:Number(button.dataset.vote)});poll()})}
+    function renderJudging(data){if(state.lastStatus==="judging")return;show("judgeView");$("judgePrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;$("judgeDrawings").innerHTML=data.drawings.map((image,index)=>`<button class="submission" data-vote="${index}"><img src="${image}" alt="Anonymous drawing ${index+1}"><span>Choose drawing ${index+1}</span></button>`).join("");document.querySelectorAll("[data-vote]").forEach(button=>button.onclick=async()=>{button.disabled=true;await api("/api/vote",{player_id:state.playerId,choice:Number(button.dataset.vote)});poll()})}
     function escapeHtml(value){const div=document.createElement("div");div.textContent=value;return div.innerHTML}
     function renderResult(data){if(state.lastStatus==="complete")return;show("resultView");$("winner").textContent=`${data.winner} wins`;$("resultDrawings").innerHTML=data.drawings.map((image,index)=>`<div class="submission"><img src="${image}" alt="Drawing by ${escapeHtml(data.artists[index])}"><span>${escapeHtml(data.artists[index])}${data.artists[index]===data.winner?" · Winner":""}</span></div>`).join("")}
     function resetSession(){clearInterval(state.poll);sessionStorage.removeItem("drawmatchPlayer");state.playerId=null;state.lastStatus=null;show("joinView")}
     $("artistRole").onclick=()=>role("artist");$("judgeRole").onclick=()=>role("judge");
-    $("joinForm").onsubmit=async event=>{event.preventDefault();$("joinButton").disabled=true;$("joinError").textContent="";try{const data=await api("/api/join",{auth_token:state.authToken,role:state.role});state.playerId=data.player_id;sessionStorage.setItem("drawmatchPlayer",state.playerId);startPolling()}catch(error){$("joinError").textContent=error.message}finally{$("joinButton").disabled=!state.authToken}};
+    $("promptedMode").onclick=()=>mode("prompted");$("promptlessMode").onclick=()=>mode("promptless");
+    $("twoArtists").onclick=()=>artistCount(2);$("fourArtists").onclick=()=>artistCount(4);
+    $("publicMatch").onclick=()=>matchType("public");$("privateMatch").onclick=()=>matchType("private");
+    async function enterMatch(path,body){$("joinButton").disabled=true;$("joinRoom").disabled=true;$("createRoom").disabled=true;$("joinError").textContent="";try{const data=await api(path,body);state.playerId=data.player_id;sessionStorage.setItem("drawmatchPlayer",state.playerId);startPolling()}catch(error){$("joinError").textContent=error.message}finally{renderProfile()}}
+    $("joinForm").onsubmit=event=>{event.preventDefault();if(state.matchType==="private")enterMatch("/api/room/join",{auth_token:state.authToken,role:state.role,room_code:$("roomCode").value});else enterMatch("/api/join",{auth_token:state.authToken,role:state.role,mode:state.mode,artist_count:state.artistCount})};
+    $("createRoom").onclick=()=>enterMatch("/api/room/create",{auth_token:state.authToken,role:state.role,mode:state.mode,artist_count:state.artistCount});
     $("leaveButton").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
     canvas.onpointerdown=event=>{canvas.setPointerCapture(event.pointerId);state.stroke={color:$("color").value,size:Number($("size").value),points:[point(event)]};state.strokes.push(state.stroke)};canvas.onpointermove=event=>{if(!state.stroke)return;state.stroke.points.push(point(event));redraw()};canvas.onpointerup=canvas.onpointercancel=()=>state.stroke=null;
     $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};
