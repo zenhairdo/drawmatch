@@ -14,6 +14,7 @@
     .header-actions { display:flex; align-items:center; gap:14px; }
     .donate { min-height:36px; padding:0 13px; display:inline-flex; align-items:center; border-radius:5px; background:#ffd140; color:#172c69; text-decoration:none; font-size:13px; font-weight:850; }
     .donate:hover { background:#f4c52f; }
+    #onlineCount { color:var(--muted); font-size:13px; font-weight:700; white-space:nowrap; }
     #connection { color:var(--green); font-size:13px; font-weight:700; } #connection.offline { color:var(--coral); }
     main { width:min(1160px,100%); margin:auto; padding:34px 24px 50px; }
     [hidden] { display:none!important; } h1 { margin:0 0 10px; font-size:clamp(32px,5vw,52px); line-height:1.02; letter-spacing:0; } h2 { margin:0; font-size:20px; } p { color:var(--muted); line-height:1.55; }
@@ -50,7 +51,7 @@
   </style>
 </head>
 <body>
-  <header><div class="brand">Drawmatch <span class="beta">BETA</span></div><div class="header-actions"><div id="connection">Connected</div><a class="donate" href="https://paypal.me/drawmatch" target="_blank" rel="noopener noreferrer">Donate</a></div></header>
+  <header><div class="brand">Drawmatch <span class="beta">BETA</span></div><div class="header-actions"><div id="onlineCount" aria-live="polite">0 online</div><div id="connection">Connected</div><a class="donate" href="https://paypal.me/drawmatch" target="_blank" rel="noopener noreferrer">Donate</a></div></header>
   <main>
     <section id="joinView">
       <h1>Draw together.<br>Decide together.</h1><p>Two or four artists, one judge, and a shared round. Join from separate browsers and let matchmaking handle the rest.</p>
@@ -95,6 +96,7 @@
     function matchType(type){state.matchType=type;$("publicMatch").classList.toggle("active",type==="public");$("privateMatch").classList.toggle("active",type==="private");$("privateRoom").hidden=type!=="private";$("joinButton").hidden=type==="private"}
     async function api(path,body){const options=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
     function setConnection(ok){$("connection").textContent=ok?"Connected":"Reconnecting…";$("connection").classList.toggle("offline",!ok)}
+    async function updateOnlineCount(){try{const data=await api("/api/stats");$("onlineCount").textContent=`${data.online} online`}catch(error){$("onlineCount").textContent="— online"}}
     function startPolling(){clearInterval(state.poll);poll();state.poll=setInterval(poll,800)}
     async function poll(){if(!state.playerId)return;try{const data=await api(`/api/state?player_id=${encodeURIComponent(state.playerId)}`);setConnection(true);renderState(data)}catch(error){if(error.message==="Player session not found."){setConnection(true);resetSession()}else{setConnection(false)}}}
     function renderState(data){
@@ -128,7 +130,7 @@
     $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};
     $("submit").onclick=async()=>{$("submit").disabled=true;try{await api("/api/submit",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")});state.submitted=true;poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
     $("requeue").onclick=async()=>{state.lastStatus=null;await api("/api/requeue",{player_id:state.playerId});poll()};$("leaveMatch").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
-    redraw();if(state.playerId)startPolling();
+    redraw();updateOnlineCount();setInterval(updateOnlineCount,5000);if(state.playerId)startPolling();
   </script>
 </body>
 </html>

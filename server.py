@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8000"))
 ROUND_SECONDS = 90
+ONLINE_TIMEOUT_SECONDS = 15
 MAX_BODY_BYTES = 6 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent
 PROMPTS = (
@@ -71,6 +72,7 @@ class GameStore:
                 "artist_count": artist_count,
                 "status": "queued",
                 "match_id": None,
+                "last_seen": time.time(),
             }
             self._queue_for(role, mode, artist_count).append(player_id)
             self._make_matches()
@@ -105,6 +107,7 @@ class GameStore:
     def state(self, player_id: str) -> dict:
         with self.lock:
             player = self._player(player_id)
+            player["last_seen"] = time.time()
             if player["status"] == "queued":
                 queue = self._queue_for(
                     player["role"], player["mode"], player["artist_count"]
@@ -169,6 +172,15 @@ class GameStore:
                 response["artists"] = [self.players[item]["name"] for item in match["artists"]]
                 response["drawings"] = [match["drawings"][artist] for artist in match["artists"]]
             return response
+
+    def stats(self) -> dict:
+        with self.lock:
+            cutoff = time.time() - ONLINE_TIMEOUT_SECONDS
+            online = sum(
+                player["status"] != "left" and player.get("last_seen", 0) >= cutoff
+                for player in self.players.values()
+            )
+            return {"online": online}
 
     def submit(self, player_id: str, drawing: str) -> None:
         if not drawing.startswith("data:image/png;base64,"):
@@ -305,6 +317,7 @@ class GameStore:
             "status": "room",
             "room_code": room["code"],
             "match_id": None,
+            "last_seen": time.time(),
         }
         self._seat_player(room, player_id, role)
         self._start_room_if_ready(room)
@@ -389,6 +402,9 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        if parsed.path == "/api/stats":
+            self._handle(STORE.stats)
+            return
         if parsed.path == "/api/state":
             STORE.expire_rounds()
             player_id = parse_qs(parsed.query).get("player_id", [""])[0]
