@@ -1,6 +1,7 @@
 # Drawmatch Beta
 
 A browser-based multiplayer drawing match for two artists and one judge.
+Players authenticate with Google before choosing a matchmaking role.
 
 ## Run locally
 

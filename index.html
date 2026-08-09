@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Drawmatch Beta</title>
+  <script src="https://accounts.google.com/gsi/client" async></script>
   <style>
     :root { --ink:#191b20; --muted:#687078; --line:#d9dde1; --paper:#fff; --wash:#f3f5f6; --coral:#ed5b49; --cyan:#168da3; --green:#237a57; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
     * { box-sizing:border-box; }
@@ -25,6 +27,9 @@
     .how { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); background:white; }
     .step { min-height:210px; padding:22px; } .step+.step { border-left:1px solid var(--line); } .number { color:var(--coral); font-size:12px; font-weight:900; } .step h2 { margin:38px 0 8px; }
     .error { min-height:24px; margin-top:12px; color:var(--coral); font-weight:700; }
+    .signin { min-height:48px; display:flex; align-items:center; margin-bottom:16px; }
+    .profile { min-height:58px; display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:8px; border:1px solid var(--line); background:white; }
+    .profile img { width:40px; height:40px; border-radius:50%; } .profile strong,.profile span { display:block; } .profile span { color:var(--muted); font-size:12px; }
     .center { min-height:calc(100vh - 165px); display:grid; place-items:center; text-align:center; } .center-inner { width:min(580px,100%); }
     .queue-role { margin:0 auto 22px; width:72px; height:72px; display:grid; place-items:center; border-radius:50%; background:var(--cyan); color:white; font-size:25px; font-weight:900; }
     .queue-role.judge { background:var(--green); } .queue-stats { display:flex; justify-content:center; gap:28px; margin:24px 0; color:var(--muted); } .queue-stats strong { display:block; color:var(--ink); font-size:23px; }
@@ -49,9 +54,9 @@
       <h1>Draw together.<br>Decide together.</h1><p>Two artists, one prompt, and one judge. Join from separate browsers and let matchmaking handle the rest.</p>
       <div class="join">
         <form id="joinForm" class="join-form">
-          <label for="name">PLAYER NAME</label><input id="name" type="text" maxlength="20" autocomplete="off" required>
+          <label>PLAYER ACCOUNT</label><div id="googleSignin" class="signin"></div><div id="profile" class="profile" hidden><img id="profileImage" alt=""><div><strong id="profileName"></strong><span id="profileEmail"></span></div></div>
           <div class="roles"><button id="artistRole" type="button" class="active">Artist</button><button id="judgeRole" type="button">Judge</button></div>
-          <button id="joinButton" class="primary" type="submit">Join matchmaking</button><div id="joinError" class="error"></div>
+          <button id="joinButton" class="primary" type="submit" disabled>Join matchmaking</button><div id="joinError" class="error"></div>
         </form>
         <div class="how"><div class="step"><div class="number">01</div><h2>Queue</h2><p>Choose artist or judge.</p></div><div class="step"><div class="number">02</div><h2>Create</h2><p>Artists draw the same prompt.</p></div><div class="step"><div class="number">03</div><h2>Decide</h2><p>The judge chooses anonymously.</p></div></div>
       </div>
@@ -74,11 +79,14 @@
 
   <script>
     const views=["joinView","queueView","drawView","waitView","judgeWaitView","judgeView","resultView"], $=id=>document.getElementById(id);
-    const state={role:"artist",playerId:sessionStorage.getItem("drawmatchPlayer"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false};
+    const state={role:"artist",playerId:sessionStorage.getItem("drawmatchPlayer"),authToken:sessionStorage.getItem("drawmatchAuth"),profile:JSON.parse(sessionStorage.getItem("drawmatchProfile")||"null"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false};
     const canvas=$("canvas"),ctx=canvas.getContext("2d");
     function show(id){views.forEach(view=>$(view).hidden=view!==id)}
     function role(role){state.role=role;$("artistRole").classList.toggle("active",role==="artist");$("judgeRole").classList.toggle("active",role==="judge")}
     async function api(path,body){const options=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
+    async function initializeGoogle(){try{const config=await api("/api/config");while(!window.google)await new Promise(resolve=>setTimeout(resolve,50));google.accounts.id.initialize({client_id:config.google_client_id,callback:handleGoogleCredential});google.accounts.id.renderButton($("googleSignin"),{type:"standard",theme:"outline",size:"large",text:"signin_with",shape:"rectangular",width:300})}catch(error){$("joinError").textContent="Could not load Google sign-in."}}
+    async function handleGoogleCredential(response){$("joinError").textContent="";try{const data=await api("/api/auth/google",{credential:response.credential});state.authToken=data.auth_token;state.profile=data.profile;sessionStorage.setItem("drawmatchAuth",state.authToken);sessionStorage.setItem("drawmatchProfile",JSON.stringify(state.profile));renderProfile()}catch(error){$("joinError").textContent=error.message}}
+    function renderProfile(){const signedIn=Boolean(state.profile&&state.authToken);$("profile").hidden=!signedIn;$("googleSignin").hidden=signedIn;$("joinButton").disabled=!signedIn;if(signedIn){$("profileImage").src=state.profile.picture||"";$("profileImage").hidden=!state.profile.picture;$("profileName").textContent=state.profile.name;$("profileEmail").textContent=state.profile.email}}
     function setConnection(ok){$("connection").textContent=ok?"Connected":"Reconnecting…";$("connection").classList.toggle("offline",!ok)}
     function startPolling(){clearInterval(state.poll);poll();state.poll=setInterval(poll,800)}
     async function poll(){if(!state.playerId)return;try{const data=await api(`/api/state?player_id=${encodeURIComponent(state.playerId)}`);setConnection(true);renderState(data)}catch(error){if(error.message==="Player session not found."){setConnection(true);resetSession()}else{setConnection(false)}}}
@@ -101,13 +109,13 @@
     function renderResult(data){if(state.lastStatus==="complete")return;show("resultView");$("winner").textContent=`${data.winner} wins`;$("resultDrawings").innerHTML=data.drawings.map((image,index)=>`<div class="submission"><img src="${image}" alt="Drawing by ${escapeHtml(data.artists[index])}"><span>${escapeHtml(data.artists[index])}${data.artists[index]===data.winner?" · Winner":""}</span></div>`).join("")}
     function resetSession(){clearInterval(state.poll);sessionStorage.removeItem("drawmatchPlayer");state.playerId=null;state.lastStatus=null;show("joinView")}
     $("artistRole").onclick=()=>role("artist");$("judgeRole").onclick=()=>role("judge");
-    $("joinForm").onsubmit=async event=>{event.preventDefault();$("joinButton").disabled=true;$("joinError").textContent="";try{const data=await api("/api/join",{name:$("name").value,role:state.role});state.playerId=data.player_id;sessionStorage.setItem("drawmatchPlayer",state.playerId);startPolling()}catch(error){$("joinError").textContent=error.message}finally{$("joinButton").disabled=false}};
+    $("joinForm").onsubmit=async event=>{event.preventDefault();$("joinButton").disabled=true;$("joinError").textContent="";try{const data=await api("/api/join",{auth_token:state.authToken,role:state.role});state.playerId=data.player_id;sessionStorage.setItem("drawmatchPlayer",state.playerId);startPolling()}catch(error){$("joinError").textContent=error.message}finally{$("joinButton").disabled=!state.authToken}};
     $("leaveButton").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
     canvas.onpointerdown=event=>{canvas.setPointerCapture(event.pointerId);state.stroke={color:$("color").value,size:Number($("size").value),points:[point(event)]};state.strokes.push(state.stroke)};canvas.onpointermove=event=>{if(!state.stroke)return;state.stroke.points.push(point(event));redraw()};canvas.onpointerup=canvas.onpointercancel=()=>state.stroke=null;
     $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};
     $("submit").onclick=async()=>{$("submit").disabled=true;try{await api("/api/submit",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")});state.submitted=true;poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
     $("requeue").onclick=async()=>{state.lastStatus=null;await api("/api/requeue",{player_id:state.playerId});poll()};$("leaveMatch").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
-    redraw();if(state.playerId)startPolling();
+    redraw();renderProfile();initializeGoogle();if(state.playerId)startPolling();
   </script>
 </body>
 </html>

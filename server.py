@@ -13,7 +13,9 @@ from collections import deque
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, urlparse
+from urllib.request import urlopen
 
 
 HOST = "0.0.0.0"
@@ -21,6 +23,7 @@ PORT = int(os.environ.get("PORT", "8000"))
 ROUND_SECONDS = 90
 MAX_BODY_BYTES = 6 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 PROMPTS = (
     "A lighthouse on another planet",
     "The world's worst superhero",
@@ -40,26 +43,56 @@ class GameStore:
         self.matches: dict[str, dict] = {}
         self.artist_queue: deque[str] = deque()
         self.judge_queue: deque[str] = deque()
-    def join(self, name: str, role: str) -> dict:
-        name = " ".join(name.strip().split())[:20]
-        if not name:
-            raise ValueError("Enter a player name.")
+        self.auth_sessions: dict[str, dict] = {}
+
+    def authenticate(self, credential: str) -> dict:
+        if not GOOGLE_CLIENT_ID:
+            raise ValueError("Google sign-in is not configured on this server.")
+        try:
+            endpoint = "https://oauth2.googleapis.com/tokeninfo?id_token=" + quote(
+                credential, safe=""
+            )
+            with urlopen(endpoint, timeout=8) as response:
+                profile = json.load(response)
+        except (HTTPError, URLError, json.JSONDecodeError) as error:
+            raise ValueError("Google could not verify this sign-in.") from error
+        if profile.get("aud") != GOOGLE_CLIENT_ID:
+            raise ValueError("This Google sign-in belongs to a different app.")
+        if profile.get("iss") not in {"accounts.google.com", "https://accounts.google.com"}:
+            raise ValueError("Google returned an invalid token issuer.")
+        if profile.get("email_verified") not in {True, "true"}:
+            raise ValueError("The Google account email is not verified.")
+        auth_token = secrets.token_urlsafe(32)
+        self.auth_sessions[auth_token] = {
+            "sub": profile["sub"],
+            "name": " ".join(profile.get("name", "Player").split())[:40],
+            "email": profile.get("email", ""),
+            "picture": profile.get("picture", ""),
+        }
+        return {"auth_token": auth_token, "profile": self.auth_sessions[auth_token]}
+
+    def join(self, auth_token: str, role: str) -> dict:
         if role not in {"artist", "judge"}:
             raise ValueError("Choose artist or judge.")
 
         with self.lock:
-            active_names = {
-                player["name"].casefold()
+            profile = self.auth_sessions.get(auth_token)
+            if profile is None:
+                raise ValueError("Sign in with Google before joining.")
+            active_accounts = {
+                player["google_sub"]
                 for player in self.players.values()
                 if player["status"] != "left"
             }
-            if name.casefold() in active_names:
-                raise ValueError("That name is already in use.")
+            if profile["sub"] in active_accounts:
+                raise ValueError("This Google account is already queued or playing.")
 
             player_id = secrets.token_urlsafe(18)
             self.players[player_id] = {
                 "id": player_id,
-                "name": name,
+                "name": profile["name"],
+                "picture": profile["picture"],
+                "google_sub": profile["sub"],
                 "role": role,
                 "status": "queued",
                 "match_id": None,
@@ -78,6 +111,7 @@ class GameStore:
                     "status": "queued",
                     "role": player["role"],
                     "name": player["name"],
+                    "picture": player["picture"],
                     "position": position,
                     "artists_waiting": len(self.artist_queue),
                     "judges_waiting": len(self.judge_queue),
@@ -91,6 +125,7 @@ class GameStore:
                 "status": match["status"],
                 "role": player["role"],
                 "name": player["name"],
+                "picture": player["picture"],
                 "prompt": match["prompt"],
                 "deadline": match["deadline"],
                 "submitted": player_id in match["drawings"],
@@ -220,12 +255,16 @@ class Handler(SimpleHTTPRequestHandler):
             player_id = parse_qs(parsed.query).get("player_id", [""])[0]
             self._handle(lambda: STORE.state(player_id))
             return
+        if parsed.path == "/api/config":
+            self._json(HTTPStatus.OK, {"google_client_id": GOOGLE_CLIENT_ID})
+            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
 
     def do_POST(self) -> None:
         routes = {
+            "/api/auth/google": self._auth_google,
             "/api/join": self._join,
             "/api/submit": self._submit,
             "/api/vote": self._vote,
@@ -241,7 +280,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _join(self) -> dict:
         body = self._body()
-        return STORE.join(body.get("name", ""), body.get("role", ""))
+        return STORE.join(body.get("auth_token", ""), body.get("role", ""))
+
+    def _auth_google(self) -> dict:
+        return STORE.authenticate(self._body().get("credential", ""))
 
     def _submit(self) -> dict:
         body = self._body()
