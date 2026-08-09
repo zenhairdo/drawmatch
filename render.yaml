@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: drawmatch-beta
+    runtime: python
+    plan: free
+    buildCommand: "python3 -m py_compile server.py"
+    startCommand: "python3 server.py"
+    healthCheckPath: /
+    autoDeployTrigger: commit

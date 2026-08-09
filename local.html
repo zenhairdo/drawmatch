@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drawmatch Local</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #191b20;
+      --muted: #687078;
+      --line: #d9dde1;
+      --paper: #ffffff;
+      --wash: #f3f5f6;
+      --coral: #ed5b49;
+      --cyan: #168da3;
+      --green: #237a57;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--wash); color: var(--ink); }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+
+    .app-header {
+      height: 64px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      background: var(--paper);
+    }
+    .brand { font-size: 21px; font-weight: 800; }
+    .phase { color: var(--muted); font-size: 14px; }
+    main { width: min(1180px, 100%); margin: 0 auto; padding: 32px 24px 48px; }
+    .screen[hidden] { display: none; }
+    h1 { margin: 0 0 8px; font-size: clamp(30px, 5vw, 48px); line-height: 1.05; letter-spacing: 0; }
+    h2 { margin: 0; font-size: 19px; letter-spacing: 0; }
+    p { color: var(--muted); line-height: 1.55; }
+
+    .lobby-grid { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 48px; margin-top: 38px; }
+    .join-panel { border-top: 4px solid var(--coral); padding-top: 22px; }
+    label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 13px; font-weight: 700; }
+    input[type="text"] { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #aeb5bb; border-radius: 4px; background: white; }
+    input:focus { outline: 3px solid rgba(22, 141, 163, .18); border-color: var(--cyan); }
+    .role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 18px 0; padding: 4px; background: #e5e8ea; border-radius: 6px; }
+    .role-switch button { height: 42px; border: 0; border-radius: 4px; background: transparent; color: #4e555b; font-weight: 750; }
+    .role-switch button.active { background: white; color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+    .primary { min-height: 44px; padding: 0 18px; border: 0; border-radius: 5px; color: white; background: var(--ink); font-weight: 750; }
+    .primary:hover { background: #30343b; }
+    .secondary { min-height: 40px; padding: 0 15px; border: 1px solid #aeb5bb; border-radius: 5px; background: white; color: var(--ink); font-weight: 700; }
+    .danger { background: var(--coral); }
+
+    .queue-board { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); background: white; }
+    .queue-column { min-height: 290px; padding: 22px; }
+    .queue-column + .queue-column { border-left: 1px solid var(--line); }
+    .queue-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+    .count { color: var(--muted); font-size: 13px; }
+    .queue-list { display: grid; gap: 8px; }
+    .queue-item { min-height: 48px; padding: 12px; display: flex; align-items: center; gap: 10px; border-radius: 5px; background: var(--wash); }
+    .avatar { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; background: var(--cyan); color: white; font-size: 12px; font-weight: 800; }
+    .judge-avatar { background: var(--green); }
+    .empty { padding: 22px 0; color: #969ca1; font-size: 14px; }
+    .match-status { margin-top: 14px; min-height: 24px; color: var(--green); font-weight: 700; }
+
+    .handoff { min-height: calc(100vh - 145px); display: grid; place-items: center; text-align: center; }
+    .handoff-inner { max-width: 560px; }
+    .handoff-badge { margin: 0 auto 22px; width: 72px; height: 72px; display: grid; place-items: center; border-radius: 50%; background: var(--coral); color: white; font-size: 28px; font-weight: 850; }
+    .handoff .primary { margin-top: 18px; }
+
+    .round-top { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 24px; margin-bottom: 16px; }
+    .prompt-label { color: var(--coral); text-transform: uppercase; font-size: 12px; font-weight: 850; }
+    .prompt { margin-top: 4px; font-size: 27px; font-weight: 800; }
+    .timer { min-width: 92px; text-align: right; font-variant-numeric: tabular-nums; font-size: 30px; font-weight: 850; }
+    .timer.warning { color: var(--coral); }
+    .drawing-layout { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 14px; }
+    .tools { display: flex; flex-direction: column; gap: 8px; }
+    .tool { width: 46px; height: 42px; border: 1px solid var(--line); border-radius: 5px; background: white; font-weight: 850; }
+    .tool:hover { border-color: #818a91; }
+    .tools input[type="color"] { width: 46px; height: 42px; padding: 3px; border: 1px solid var(--line); border-radius: 5px; background: white; }
+    .range-wrap { writing-mode: vertical-lr; direction: rtl; height: 130px; margin-left: 13px; }
+    #drawCanvas { display: block; width: 100%; aspect-ratio: 4 / 3; border: 1px solid #bfc5ca; background: white; touch-action: none; cursor: crosshair; }
+    .round-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+    .judge-header { margin-bottom: 24px; }
+    .submissions { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    .submission { margin: 0; padding: 0; border: 2px solid transparent; border-radius: 6px; background: white; overflow: hidden; text-align: left; }
+    .submission:hover, .submission:focus-visible { border-color: var(--cyan); outline: none; }
+    .submission img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: white; }
+    .submission span { display: block; padding: 14px; border-top: 1px solid var(--line); font-weight: 800; }
+    .winner-strip { margin: 28px 0; padding: 18px; border-left: 5px solid var(--green); background: white; font-size: 21px; font-weight: 800; }
+    .result-actions { display: flex; gap: 10px; }
+
+    @media (max-width: 760px) {
+      .app-header { padding: 0 16px; }
+      main { padding: 24px 16px 36px; }
+      .lobby-grid { grid-template-columns: 1fr; gap: 28px; }
+      .queue-board, .submissions { grid-template-columns: 1fr; }
+      .queue-column + .queue-column { border-left: 0; border-top: 1px solid var(--line); }
+      .drawing-layout { grid-template-columns: 1fr; }
+      .tools { flex-direction: row; align-items: center; }
+      .range-wrap { writing-mode: horizontal-tb; direction: ltr; width: 120px; height: auto; margin: 0; }
+      .round-top { align-items: start; }
+      .prompt { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">Drawmatch</div>
+    <div id="phaseLabel" class="phase">Local matchmaking</div>
+  </header>
+
+  <main>
+    <section id="lobbyScreen" class="screen">
+      <h1>Three seats.<br>One verdict.</h1>
+      <p>Queue two artists and one judge on this device to begin a private drawing match.</p>
+      <div class="lobby-grid">
+        <form id="joinForm" class="join-panel">
+          <label for="playerName">PLAYER NAME</label>
+          <input id="playerName" type="text" maxlength="20" autocomplete="off" required>
+          <div class="role-switch" aria-label="Choose role">
+            <button id="artistRole" type="button" class="active" aria-pressed="true">Artist</button>
+            <button id="judgeRole" type="button" aria-pressed="false">Judge</button>
+          </div>
+          <button class="primary" type="submit">Join queue</button>
+          <div id="matchStatus" class="match-status" aria-live="polite"></div>
+        </form>
+
+        <div class="queue-board">
+          <section class="queue-column">
+            <div class="queue-head"><h2>Artists</h2><span id="artistCount" class="count">0 / 2</span></div>
+            <div id="artistQueue" class="queue-list"></div>
+          </section>
+          <section class="queue-column">
+            <div class="queue-head"><h2>Judge</h2><span id="judgeCount" class="count">0 / 1</span></div>
+            <div id="judgeQueue" class="queue-list"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section id="handoffScreen" class="screen handoff" hidden>
+      <div class="handoff-inner">
+        <div id="handoffBadge" class="handoff-badge">A</div>
+        <h1 id="handoffTitle">Pass the device</h1>
+        <p id="handoffCopy"></p>
+        <button id="handoffButton" class="primary">I’m ready</button>
+      </div>
+    </section>
+
+    <section id="drawScreen" class="screen" hidden>
+      <div class="round-top">
+        <div><div class="prompt-label">Your prompt</div><div id="promptText" class="prompt"></div></div>
+        <div id="timer" class="timer">01:00</div>
+      </div>
+      <div class="drawing-layout">
+        <div class="tools" aria-label="Drawing tools">
+          <input id="brushColor" type="color" value="#191b20" title="Brush color" aria-label="Brush color">
+          <button id="undoButton" class="tool" type="button" title="Undo" aria-label="Undo">↶</button>
+          <button id="clearButton" class="tool" type="button" title="Clear canvas" aria-label="Clear canvas">×</button>
+          <input id="brushSize" class="range-wrap" type="range" min="1" max="32" value="5" title="Brush size" aria-label="Brush size">
+        </div>
+        <canvas id="drawCanvas" width="1200" height="900"></canvas>
+      </div>
+      <div class="round-actions"><button id="submitDrawing" class="primary">Submit drawing</button></div>
+    </section>
+
+    <section id="judgeScreen" class="screen" hidden>
+      <div class="judge-header">
+        <div class="prompt-label">Judge the prompt</div>
+        <h1 id="judgePrompt"></h1>
+        <p>Choose the drawing that answers the prompt best. Artist names stay hidden until your vote is locked.</p>
+      </div>
+      <div id="submissions" class="submissions"></div>
+    </section>
+
+    <section id="resultScreen" class="screen" hidden>
+      <h1>Match decided.</h1>
+      <div id="winnerStrip" class="winner-strip"></div>
+      <div id="resultGallery" class="submissions"></div>
+      <div class="result-actions">
+        <button id="rematchButton" class="primary">Rematch</button>
+        <button id="newLobbyButton" class="secondary">New lobby</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const prompts = [
+      "A lighthouse on another planet",
+      "The world’s worst superhero",
+      "Breakfast escaping the kitchen",
+      "A tiny city inside a shoe",
+      "A dragon working from home",
+      "The last tree at the end of time"
+    ];
+
+    const state = {
+      role: "artist",
+      artists: [],
+      judge: null,
+      prompt: "",
+      currentArtist: 0,
+      drawings: [],
+      seconds: 60,
+      timerId: null,
+      strokes: [],
+      currentStroke: null
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const screens = ["lobbyScreen", "handoffScreen", "drawScreen", "judgeScreen", "resultScreen"];
+    const canvas = $("drawCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function showScreen(id, label) {
+      screens.forEach((screen) => $(screen).hidden = screen !== id);
+      $("phaseLabel").textContent = label;
+    }
+
+    function setRole(role) {
+      state.role = role;
+      ["artist", "judge"].forEach((name) => {
+        const button = $(name + "Role");
+        const active = name === role;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+    }
+
+    function queueMarkup(players, judge = false) {
+      if (!players.length) return '<div class="empty">Waiting for a player…</div>';
+      return players.map((name) => `<div class="queue-item"><span class="avatar ${judge ? "judge-avatar" : ""}">${escapeHtml(name[0])}</span>${escapeHtml(name)}</div>`).join("");
+    }
+
+    function escapeHtml(value) {
+      const node = document.createElement("div");
+      node.textContent = value;
+      return node.innerHTML;
+    }
+
+    function renderQueues() {
+      $("artistQueue").innerHTML = queueMarkup(state.artists);
+      $("judgeQueue").innerHTML = queueMarkup(state.judge ? [state.judge] : [], true);
+      $("artistCount").textContent = `${state.artists.length} / 2`;
+      $("judgeCount").textContent = `${state.judge ? 1 : 0} / 1`;
+      const ready = state.artists.length === 2 && state.judge;
+      $("matchStatus").textContent = ready ? "Match found. Preparing the prompt…" : "";
+      if (ready) setTimeout(startMatch, 650);
+    }
+
+    function startMatch() {
+      state.prompt = prompts[Math.floor(Math.random() * prompts.length)];
+      state.currentArtist = 0;
+      state.drawings = [];
+      showHandoff("artist");
+    }
+
+    function showHandoff(next) {
+      clearInterval(state.timerId);
+      showScreen("handoffScreen", "Private handoff");
+      if (next === "artist") {
+        const name = state.artists[state.currentArtist];
+        $("handoffBadge").textContent = name[0].toUpperCase();
+        $("handoffTitle").textContent = `Pass to ${name}`;
+        $("handoffCopy").textContent = `Artist ${state.currentArtist + 1}, keep the screen private until you submit.`;
+        $("handoffButton").textContent = "Start drawing";
+        $("handoffButton").onclick = beginDrawing;
+      } else {
+        $("handoffBadge").textContent = "J";
+        $("handoffTitle").textContent = `Pass to ${state.judge}`;
+        $("handoffCopy").textContent = "Both drawings are locked. The artist names will remain hidden during judging.";
+        $("handoffButton").textContent = "Reveal drawings";
+        $("handoffButton").onclick = beginJudging;
+      }
+    }
+
+    function beginDrawing() {
+      showScreen("drawScreen", `${state.artists[state.currentArtist]} drawing`);
+      $("promptText").textContent = state.prompt;
+      state.strokes = [];
+      redraw();
+      state.seconds = 60;
+      renderTimer();
+      clearInterval(state.timerId);
+      state.timerId = setInterval(() => {
+        state.seconds -= 1;
+        renderTimer();
+        if (state.seconds <= 0) submitDrawing();
+      }, 1000);
+    }
+
+    function renderTimer() {
+      const minutes = String(Math.floor(state.seconds / 60)).padStart(2, "0");
+      const seconds = String(state.seconds % 60).padStart(2, "0");
+      $("timer").textContent = `${minutes}:${seconds}`;
+      $("timer").classList.toggle("warning", state.seconds <= 10);
+    }
+
+    function pointFromEvent(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * canvas.width / rect.width,
+        y: (event.clientY - rect.top) * canvas.height / rect.height
+      };
+    }
+
+    function beginStroke(event) {
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      const point = pointFromEvent(event);
+      state.currentStroke = { color: $("brushColor").value, size: Number($("brushSize").value), points: [point] };
+      state.strokes.push(state.currentStroke);
+    }
+
+    function extendStroke(event) {
+      if (!state.currentStroke) return;
+      state.currentStroke.points.push(pointFromEvent(event));
+      redraw();
+    }
+
+    function endStroke() {
+      state.currentStroke = null;
+    }
+
+    function redraw() {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      state.strokes.forEach((stroke) => {
+        if (!stroke.points.length) return;
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.size;
+        ctx.beginPath();
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+        stroke.points.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
+        if (stroke.points.length === 1) ctx.lineTo(stroke.points[0].x + .01, stroke.points[0].y + .01);
+        ctx.stroke();
+      });
+    }
+
+    function submitDrawing() {
+      clearInterval(state.timerId);
+      redraw();
+      state.drawings.push(canvas.toDataURL("image/png"));
+      if (state.currentArtist === 0) {
+        state.currentArtist = 1;
+        showHandoff("artist");
+      } else {
+        showHandoff("judge");
+      }
+    }
+
+    function beginJudging() {
+      showScreen("judgeScreen", `${state.judge} judging`);
+      $("judgePrompt").textContent = state.prompt;
+      $("submissions").innerHTML = state.drawings.map((drawing, index) => `
+        <button class="submission" data-choice="${index}">
+          <img src="${drawing}" alt="Anonymous drawing ${index + 1}">
+          <span>Choose drawing ${index + 1}</span>
+        </button>`).join("");
+      document.querySelectorAll("[data-choice]").forEach((button) => {
+        button.addEventListener("click", () => showResult(Number(button.dataset.choice)));
+      });
+    }
+
+    function showResult(winner) {
+      showScreen("resultScreen", "Match complete");
+      $("winnerStrip").textContent = `${state.artists[winner]} wins — chosen by ${state.judge}`;
+      $("resultGallery").innerHTML = state.drawings.map((drawing, index) => `
+        <div class="submission">
+          <img src="${drawing}" alt="Drawing by ${escapeHtml(state.artists[index])}">
+          <span>${escapeHtml(state.artists[index])}${index === winner ? " · Winner" : ""}</span>
+        </div>`).join("");
+    }
+
+    $("artistRole").addEventListener("click", () => setRole("artist"));
+    $("judgeRole").addEventListener("click", () => setRole("judge"));
+    $("joinForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const name = $("playerName").value.trim();
+      if (!name) return;
+      if ([...state.artists, state.judge].includes(name)) {
+        $("matchStatus").textContent = "That name is already queued.";
+        return;
+      }
+      if (state.role === "artist") {
+        if (state.artists.length >= 2) { $("matchStatus").textContent = "The artist queue is full."; return; }
+        state.artists.push(name);
+      } else {
+        if (state.judge) { $("matchStatus").textContent = "The judge queue is full."; return; }
+        state.judge = name;
+      }
+      $("playerName").value = "";
+      renderQueues();
+      $("playerName").focus();
+    });
+
+    canvas.addEventListener("pointerdown", beginStroke);
+    canvas.addEventListener("pointermove", extendStroke);
+    canvas.addEventListener("pointerup", endStroke);
+    canvas.addEventListener("pointercancel", endStroke);
+    $("undoButton").addEventListener("click", () => { state.strokes.pop(); redraw(); });
+    $("clearButton").addEventListener("click", () => { state.strokes = []; redraw(); });
+    $("submitDrawing").addEventListener("click", submitDrawing);
+    $("rematchButton").addEventListener("click", startMatch);
+    $("newLobbyButton").addEventListener("click", () => {
+      state.artists = [];
+      state.judge = null;
+      state.drawings = [];
+      renderQueues();
+      showScreen("lobbyScreen", "Local matchmaking");
+    });
+
+    renderQueues();
+    redraw();
+  </script>
+</body>
+</html>

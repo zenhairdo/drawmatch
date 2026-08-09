@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drawmatch Beta</title>
+  <style>
+    :root { --ink:#191b20; --muted:#687078; --line:#d9dde1; --paper:#fff; --wash:#f3f5f6; --coral:#ed5b49; --cyan:#168da3; --green:#237a57; font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; min-height:100vh; background:var(--wash); color:var(--ink); }
+    button,input { font:inherit; } button { cursor:pointer; } button:disabled { opacity:.45; cursor:not-allowed; }
+    header { height:64px; padding:0 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); background:var(--paper); }
+    .brand { font-size:21px; font-weight:850; } .beta { margin-left:8px; padding:3px 6px; color:white; background:var(--coral); border-radius:3px; font-size:10px; vertical-align:middle; }
+    #connection { color:var(--green); font-size:13px; font-weight:700; } #connection.offline { color:var(--coral); }
+    main { width:min(1160px,100%); margin:auto; padding:34px 24px 50px; }
+    [hidden] { display:none!important; } h1 { margin:0 0 10px; font-size:clamp(32px,5vw,52px); line-height:1.02; letter-spacing:0; } h2 { margin:0; font-size:20px; } p { color:var(--muted); line-height:1.55; }
+    .join { display:grid; grid-template-columns:minmax(280px,430px) 1fr; gap:70px; align-items:start; margin-top:55px; }
+    .join-form { padding-top:22px; border-top:4px solid var(--coral); } label { display:block; margin-bottom:8px; color:var(--muted); font-size:12px; font-weight:800; }
+    input[type=text] { width:100%; height:48px; padding:0 13px; border:1px solid #abb2b8; border-radius:4px; background:white; }
+    input:focus { outline:3px solid rgba(22,141,163,.18); border-color:var(--cyan); }
+    .roles { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:18px 0; padding:4px; background:#e3e7e9; border-radius:6px; }
+    .roles button { height:43px; border:0; border-radius:4px; background:transparent; color:#535b61; font-weight:800; } .roles .active { background:white; color:var(--ink); box-shadow:0 1px 4px #0002; }
+    .primary,.secondary { min-height:44px; padding:0 18px; border-radius:5px; font-weight:800; }
+    .primary { border:0; color:white; background:var(--ink); } .primary:hover { background:#30343b; } .secondary { border:1px solid #abb2b8; background:white; }
+    .how { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid var(--line); background:white; }
+    .step { min-height:210px; padding:22px; } .step+.step { border-left:1px solid var(--line); } .number { color:var(--coral); font-size:12px; font-weight:900; } .step h2 { margin:38px 0 8px; }
+    .error { min-height:24px; margin-top:12px; color:var(--coral); font-weight:700; }
+    .center { min-height:calc(100vh - 165px); display:grid; place-items:center; text-align:center; } .center-inner { width:min(580px,100%); }
+    .queue-role { margin:0 auto 22px; width:72px; height:72px; display:grid; place-items:center; border-radius:50%; background:var(--cyan); color:white; font-size:25px; font-weight:900; }
+    .queue-role.judge { background:var(--green); } .queue-stats { display:flex; justify-content:center; gap:28px; margin:24px 0; color:var(--muted); } .queue-stats strong { display:block; color:var(--ink); font-size:23px; }
+    .prompt-label { color:var(--coral); font-size:12px; font-weight:900; text-transform:uppercase; } .prompt { margin-top:4px; font-size:28px; font-weight:850; }
+    .round-head { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; margin-bottom:16px; } .timer { min-width:96px; text-align:right; font-size:31px; font-weight:900; font-variant-numeric:tabular-nums; } .timer.warning { color:var(--coral); }
+    .draw-layout { display:grid; grid-template-columns:66px minmax(0,1fr); gap:14px; } .tools { display:flex; flex-direction:column; gap:8px; }
+    .tool,.tools input[type=color] { width:46px; height:42px; padding:3px; border:1px solid var(--line); border-radius:5px; background:white; font-weight:900; }
+    .size { writing-mode:vertical-lr; direction:rtl; height:130px; margin-left:12px; }
+    canvas { display:block; width:100%; aspect-ratio:4/3; border:1px solid #b9c0c5; background:white; touch-action:none; cursor:crosshair; }
+    .draw-actions { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-top:14px; } .draw-actions span { color:var(--muted); font-size:13px; }
+    .submissions { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:26px; }
+    .submission { padding:0; overflow:hidden; border:2px solid transparent; border-radius:6px; background:white; text-align:left; } button.submission:hover { border-color:var(--cyan); }
+    .submission img { display:block; width:100%; aspect-ratio:4/3; object-fit:contain; background:white; } .submission span { display:block; padding:14px; border-top:1px solid var(--line); font-weight:850; }
+    .winner { margin:25px 0; padding:18px; border-left:5px solid var(--green); background:white; font-size:22px; font-weight:850; } .actions { display:flex; gap:10px; margin-top:26px; }
+    @media(max-width:760px){ header{padding:0 16px} main{padding:25px 16px 40px}.join{grid-template-columns:1fr;gap:35px;margin-top:35px}.how{grid-template-columns:1fr}.step{min-height:140px}.step+.step{border-left:0;border-top:1px solid var(--line)}.step h2{margin:20px 0 6px}.draw-layout{grid-template-columns:1fr}.tools{flex-direction:row;align-items:center}.size{writing-mode:horizontal-tb;direction:ltr;width:120px;height:auto;margin:0}.submissions{grid-template-columns:1fr}.round-head{align-items:start}.prompt{font-size:22px} }
+  </style>
+</head>
+<body>
+  <header><div class="brand">Drawmatch <span class="beta">BETA</span></div><div id="connection">Connected</div></header>
+  <main>
+    <section id="joinView">
+      <h1>Draw together.<br>Decide together.</h1><p>Two artists, one prompt, and one judge. Join from separate browsers and let matchmaking handle the rest.</p>
+      <div class="join">
+        <form id="joinForm" class="join-form">
+          <label for="name">PLAYER NAME</label><input id="name" type="text" maxlength="20" autocomplete="off" required>
+          <div class="roles"><button id="artistRole" type="button" class="active">Artist</button><button id="judgeRole" type="button">Judge</button></div>
+          <button id="joinButton" class="primary" type="submit">Join matchmaking</button><div id="joinError" class="error"></div>
+        </form>
+        <div class="how"><div class="step"><div class="number">01</div><h2>Queue</h2><p>Choose artist or judge.</p></div><div class="step"><div class="number">02</div><h2>Create</h2><p>Artists draw the same prompt.</p></div><div class="step"><div class="number">03</div><h2>Decide</h2><p>The judge chooses anonymously.</p></div></div>
+      </div>
+    </section>
+
+    <section id="queueView" class="center" hidden><div class="center-inner"><div id="queueIcon" class="queue-role">A</div><h1>Finding your match</h1><p id="queueCopy"></p><div class="queue-stats"><div><strong id="artistsWaiting">0</strong>artists waiting</div><div><strong id="judgesWaiting">0</strong>judges waiting</div></div><button id="leaveButton" class="secondary">Leave queue</button></div></section>
+
+    <section id="drawView" hidden>
+      <div class="round-head"><div><div class="prompt-label">Your prompt</div><div id="drawPrompt" class="prompt"></div></div><div id="timer" class="timer">01:30</div></div>
+      <div class="draw-layout"><div class="tools"><input id="color" type="color" value="#191b20" title="Brush color"><button id="undo" class="tool" title="Undo">↶</button><button id="clear" class="tool" title="Clear">×</button><input id="size" class="size" type="range" min="1" max="32" value="5" title="Brush size"></div><canvas id="canvas" width="1200" height="900"></canvas></div>
+      <div class="draw-actions"><span>Your opponent cannot see your canvas.</span><button id="submit" class="primary">Submit drawing</button></div>
+    </section>
+
+    <section id="waitView" class="center" hidden><div class="center-inner"><div class="queue-role">✓</div><h1 id="waitTitle">Drawing locked</h1><p id="waitCopy">Waiting for the other artist to submit.</p></div></section>
+    <section id="judgeWaitView" class="center" hidden><div class="center-inner"><div class="queue-role judge">J</div><h1>The artists are drawing</h1><p id="judgeWaitCopy"></p><div class="prompt" id="judgeWaitPrompt"></div></div></section>
+
+    <section id="judgeView" hidden><div class="prompt-label">Judge the prompt</div><h1 id="judgePrompt"></h1><p>Choose the strongest response. Names stay hidden until your vote is final.</p><div id="judgeDrawings" class="submissions"></div></section>
+    <section id="resultView" hidden><h1>Match decided.</h1><div id="winner" class="winner"></div><div id="resultDrawings" class="submissions"></div><div class="actions"><button id="requeue" class="primary">Queue again</button><button id="leaveMatch" class="secondary">Leave</button></div></section>
+  </main>
+
+  <script>
+    const views=["joinView","queueView","drawView","waitView","judgeWaitView","judgeView","resultView"], $=id=>document.getElementById(id);
+    const state={role:"artist",playerId:sessionStorage.getItem("drawmatchPlayer"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false};
+    const canvas=$("canvas"),ctx=canvas.getContext("2d");
+    function show(id){views.forEach(view=>$(view).hidden=view!==id)}
+    function role(role){state.role=role;$("artistRole").classList.toggle("active",role==="artist");$("judgeRole").classList.toggle("active",role==="judge")}
+    async function api(path,body){const options=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
+    function setConnection(ok){$("connection").textContent=ok?"Connected":"Reconnecting…";$("connection").classList.toggle("offline",!ok)}
+    function startPolling(){clearInterval(state.poll);poll();state.poll=setInterval(poll,800)}
+    async function poll(){if(!state.playerId)return;try{const data=await api(`/api/state?player_id=${encodeURIComponent(state.playerId)}`);setConnection(true);renderState(data)}catch(error){if(error.message==="Player session not found."){setConnection(true);resetSession()}else{setConnection(false)}}}
+    function renderState(data){
+      if(data.status==="queued"){show("queueView");$("queueIcon").textContent=data.role==="artist"?"A":"J";$("queueIcon").classList.toggle("judge",data.role==="judge");$("queueCopy").textContent=`${data.name}, you are number ${data.position} in the ${data.role} queue.`;$("artistsWaiting").textContent=data.artists_waiting;$("judgesWaiting").textContent=data.judges_waiting}
+      else if(data.status==="drawing"&&data.role==="artist"&&!data.submitted){if(state.lastStatus!=="drawing")beginRound(data);updateTimer(data.deadline)}
+      else if(data.status==="drawing"&&data.role==="artist"){show("waitView");$("waitCopy").textContent=data.opponent_submitted?"Both drawings are in. Preparing the judge’s view…":"Waiting for the other artist to submit."}
+      else if(data.status==="drawing"&&data.role==="judge"){show("judgeWaitView");$("judgeWaitPrompt").textContent=data.prompt;$("judgeWaitCopy").textContent="You’ll receive both drawings as soon as they are submitted.";updateTimer(data.deadline)}
+      else if(data.status==="judging"&&data.role==="judge")renderJudging(data)
+      else if(data.status==="judging"){show("waitView");$("waitTitle").textContent="The judge is deciding";$("waitCopy").textContent="Both drawings are anonymous until the vote is locked."}
+      else if(data.status==="complete")renderResult(data);else if(data.status==="left"){resetSession()}
+      state.lastStatus=data.status;
+    }
+    function beginRound(data){show("drawView");$("drawPrompt").textContent=data.prompt;state.strokes=[];state.submitted=false;redraw();api("/api/blank",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")}).catch(()=>{})}
+    function updateTimer(deadline){const seconds=Math.max(0,Math.ceil(deadline-Date.now()/1000)),m=String(Math.floor(seconds/60)).padStart(2,"0"),s=String(seconds%60).padStart(2,"0");$("timer").textContent=`${m}:${s}`;$("timer").classList.toggle("warning",seconds<=10)}
+    function point(event){const rect=canvas.getBoundingClientRect();return{x:(event.clientX-rect.left)*canvas.width/rect.width,y:(event.clientY-rect.top)*canvas.height/rect.height}}
+    function redraw(){ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.lineCap="round";ctx.lineJoin="round";state.strokes.forEach(stroke=>{ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.size;ctx.beginPath();ctx.moveTo(stroke.points[0].x,stroke.points[0].y);stroke.points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(stroke.points.length===1)ctx.lineTo(stroke.points[0].x+.01,stroke.points[0].y+.01);ctx.stroke()})}
+    function renderJudging(data){if(state.lastStatus==="judging")return;show("judgeView");$("judgePrompt").textContent=data.prompt;$("judgeDrawings").innerHTML=data.drawings.map((image,index)=>`<button class="submission" data-vote="${index}"><img src="${image}" alt="Anonymous drawing ${index+1}"><span>Choose drawing ${index+1}</span></button>`).join("");document.querySelectorAll("[data-vote]").forEach(button=>button.onclick=async()=>{button.disabled=true;await api("/api/vote",{player_id:state.playerId,choice:Number(button.dataset.vote)});poll()})}
+    function escapeHtml(value){const div=document.createElement("div");div.textContent=value;return div.innerHTML}
+    function renderResult(data){if(state.lastStatus==="complete")return;show("resultView");$("winner").textContent=`${data.winner} wins`;$("resultDrawings").innerHTML=data.drawings.map((image,index)=>`<div class="submission"><img src="${image}" alt="Drawing by ${escapeHtml(data.artists[index])}"><span>${escapeHtml(data.artists[index])}${data.artists[index]===data.winner?" · Winner":""}</span></div>`).join("")}
+    function resetSession(){clearInterval(state.poll);sessionStorage.removeItem("drawmatchPlayer");state.playerId=null;state.lastStatus=null;show("joinView")}
+    $("artistRole").onclick=()=>role("artist");$("judgeRole").onclick=()=>role("judge");
+    $("joinForm").onsubmit=async event=>{event.preventDefault();$("joinButton").disabled=true;$("joinError").textContent="";try{const data=await api("/api/join",{name:$("name").value,role:state.role});state.playerId=data.player_id;sessionStorage.setItem("drawmatchPlayer",state.playerId);startPolling()}catch(error){$("joinError").textContent=error.message}finally{$("joinButton").disabled=false}};
+    $("leaveButton").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
+    canvas.onpointerdown=event=>{canvas.setPointerCapture(event.pointerId);state.stroke={color:$("color").value,size:Number($("size").value),points:[point(event)]};state.strokes.push(state.stroke)};canvas.onpointermove=event=>{if(!state.stroke)return;state.stroke.points.push(point(event));redraw()};canvas.onpointerup=canvas.onpointercancel=()=>state.stroke=null;
+    $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};
+    $("submit").onclick=async()=>{$("submit").disabled=true;try{await api("/api/submit",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")});state.submitted=true;poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
+    $("requeue").onclick=async()=>{state.lastStatus=null;await api("/api/requeue",{player_id:state.playerId});poll()};$("leaveMatch").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
+    redraw();if(state.playerId)startPolling();
+  </script>
+</body>
+</html>
