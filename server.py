@@ -14,9 +14,7 @@ from collections import deque
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, quote, urlparse
-from urllib.request import urlopen
+from urllib.parse import parse_qs, urlparse
 
 
 HOST = "0.0.0.0"
@@ -24,7 +22,6 @@ PORT = int(os.environ.get("PORT", "8000"))
 ROUND_SECONDS = 90
 MAX_BODY_BYTES = 6 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 PROMPTS = (
     "A lighthouse on another planet",
     "The world's worst superhero",
@@ -49,57 +46,26 @@ class GameStore:
             for artist_count in (2, 4)
             for role in ("artist", "judge")
         }
-        self.auth_sessions: dict[str, dict] = {}
-
-    def authenticate(self, credential: str) -> dict:
-        if not GOOGLE_CLIENT_ID:
-            raise ValueError("Google sign-in is not configured on this server.")
-        try:
-            endpoint = "https://oauth2.googleapis.com/tokeninfo?id_token=" + quote(
-                credential, safe=""
-            )
-            with urlopen(endpoint, timeout=8) as response:
-                profile = json.load(response)
-        except (HTTPError, URLError, json.JSONDecodeError) as error:
-            raise ValueError("Google could not verify this sign-in.") from error
-        if profile.get("aud") != GOOGLE_CLIENT_ID:
-            raise ValueError("This Google sign-in belongs to a different app.")
-        if profile.get("iss") not in {"accounts.google.com", "https://accounts.google.com"}:
-            raise ValueError("Google returned an invalid token issuer.")
-        if profile.get("email_verified") not in {True, "true"}:
-            raise ValueError("The Google account email is not verified.")
-        auth_token = secrets.token_urlsafe(32)
-        self.auth_sessions[auth_token] = {
-            "sub": profile["sub"],
-            "name": " ".join(profile.get("name", "Player").split())[:40],
-            "email": profile.get("email", ""),
-            "picture": profile.get("picture", ""),
-        }
-        return {"auth_token": auth_token, "profile": self.auth_sessions[auth_token]}
-
-    def join(self, auth_token: str, role: str, mode: str, artist_count: int) -> dict:
+    def join(self, name: str, role: str, mode: str, artist_count: int) -> dict:
+        name = self._clean_name(name)
         if role not in {"artist", "judge"}:
             raise ValueError("Choose artist or judge.")
         self._validate_role_mode(role, mode, artist_count)
 
         with self.lock:
-            profile = self.auth_sessions.get(auth_token)
-            if profile is None:
-                raise ValueError("Sign in with Google before joining.")
-            active_accounts = {
-                player["google_sub"]
+            active_names = {
+                player["name"].casefold()
                 for player in self.players.values()
                 if player["status"] != "left"
             }
-            if profile["sub"] in active_accounts:
-                raise ValueError("This Google account is already queued or playing.")
+            if name.casefold() in active_names:
+                raise ValueError("That username is already queued or playing.")
 
             player_id = secrets.token_urlsafe(18)
             self.players[player_id] = {
                 "id": player_id,
-                "name": profile["name"],
-                "picture": profile["picture"],
-                "google_sub": profile["sub"],
+                "name": name,
+                "picture": "",
                 "role": role,
                 "mode": mode,
                 "artist_count": artist_count,
@@ -111,7 +77,7 @@ class GameStore:
             return {"player_id": player_id}
 
     def create_room(
-        self, auth_token: str, role: str, mode: str, artist_count: int
+        self, name: str, role: str, mode: str, artist_count: int
     ) -> dict:
         with self.lock:
             self._validate_role_mode(role, mode, artist_count)
@@ -124,16 +90,16 @@ class GameStore:
                 "artists": [],
                 "judge": None,
             }
-            player_id = self._add_room_player(auth_token, self.rooms[code], role)
+            player_id = self._add_room_player(name, self.rooms[code], role)
             return {"player_id": player_id, "room_code": code}
 
-    def join_room(self, auth_token: str, code: str, role: str) -> dict:
+    def join_room(self, name: str, code: str, role: str) -> dict:
         with self.lock:
             code = code.strip().upper()
             room = self.rooms.get(code)
             if room is None or room["status"] != "waiting":
                 raise ValueError("Private room not found or already playing.")
-            player_id = self._add_room_player(auth_token, room, role)
+            player_id = self._add_room_player(name, room, role)
             return {"player_id": player_id, "room_code": code}
 
     def state(self, player_id: str) -> dict:
@@ -314,17 +280,15 @@ class GameStore:
                         self.players[player_id]["status"] = "matched"
                         self.players[player_id]["match_id"] = match_id
 
-    def _add_room_player(self, auth_token: str, room: dict, role: str) -> str:
+    def _add_room_player(self, name: str, room: dict, role: str) -> str:
         if role not in {"artist", "judge"}:
             raise ValueError("Choose artist or judge.")
-        profile = self.auth_sessions.get(auth_token)
-        if profile is None:
-            raise ValueError("Sign in with Google before joining.")
+        name = self._clean_name(name)
         if any(
-            player["google_sub"] == profile["sub"] and player["status"] != "left"
+            player["name"].casefold() == name.casefold() and player["status"] != "left"
             for player in self.players.values()
         ):
-            raise ValueError("This Google account is already queued or playing.")
+            raise ValueError("That username is already queued or playing.")
         if role == "artist" and len(room["artists"]) >= room["artist_count"]:
             raise ValueError("This room already has all of its artists.")
         if role == "judge" and room["judge"] is not None:
@@ -333,9 +297,8 @@ class GameStore:
         player_id = secrets.token_urlsafe(18)
         self.players[player_id] = {
             "id": player_id,
-            "name": profile["name"],
-            "picture": profile["picture"],
-            "google_sub": profile["sub"],
+            "name": name,
+            "picture": "",
             "role": role,
             "mode": room["mode"],
             "artist_count": room["artist_count"],
@@ -400,6 +363,13 @@ class GameStore:
         if artist_count not in {2, 4}:
             raise ValueError("Choose two or four artists.")
 
+    @staticmethod
+    def _clean_name(name: str) -> str:
+        name = " ".join(name.strip().split())[:20]
+        if not name:
+            raise ValueError("Enter a username.")
+        return name
+
     def _queue_for(self, role: str, mode: str, artist_count: int) -> deque[str]:
         return self.queues[(mode, artist_count, role)]
 
@@ -424,16 +394,12 @@ class Handler(SimpleHTTPRequestHandler):
             player_id = parse_qs(parsed.query).get("player_id", [""])[0]
             self._handle(lambda: STORE.state(player_id))
             return
-        if parsed.path == "/api/config":
-            self._json(HTTPStatus.OK, {"google_client_id": GOOGLE_CLIENT_ID})
-            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
 
     def do_POST(self) -> None:
         routes = {
-            "/api/auth/google": self._auth_google,
             "/api/join": self._join,
             "/api/room/create": self._create_room,
             "/api/room/join": self._join_room,
@@ -452,19 +418,16 @@ class Handler(SimpleHTTPRequestHandler):
     def _join(self) -> dict:
         body = self._body()
         return STORE.join(
-            body.get("auth_token", ""),
+            body.get("name", ""),
             body.get("role", ""),
             body.get("mode", ""),
             body.get("artist_count"),
         )
 
-    def _auth_google(self) -> dict:
-        return STORE.authenticate(self._body().get("credential", ""))
-
     def _create_room(self) -> dict:
         body = self._body()
         return STORE.create_room(
-            body.get("auth_token", ""),
+            body.get("name", ""),
             body.get("role", ""),
             body.get("mode", ""),
             body.get("artist_count"),
@@ -473,7 +436,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _join_room(self) -> dict:
         body = self._body()
         return STORE.join_room(
-            body.get("auth_token", ""), body.get("room_code", ""), body.get("role", "")
+            body.get("name", ""), body.get("room_code", ""), body.get("role", "")
         )
 
     def _submit(self) -> dict:
