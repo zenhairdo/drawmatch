@@ -214,6 +214,7 @@
     $("musicToggle").onclick=()=>attemptAudibleMusic();
     $("submit").onclick=async()=>{$("submit").disabled=true;try{await uploadLiveFrame();await api("/api/submit",{player_id:state.playerId,drawing:drawingData()});state.submitted=true;clearInterval(state.liveTimer);poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
     $("requeue").onclick=async()=>{state.lastStatus=null;if(state.botDemo){state.demoType==="drawing"?startBotDrawingDemo():prepareBotDemo();return}await api("/api/requeue",{player_id:state.playerId});poll()};$("leaveMatch").onclick=async()=>{if(state.botDemo){resetSession();return}await api("/api/leave",{player_id:state.playerId});resetSession()};
+    window.addEventListener("pagehide",()=>{if(!state.stagePlayerId)return;const body=new Blob([JSON.stringify({stage_player_id:state.stagePlayerId})],{type:"application/json"});navigator.sendBeacon("/api/stage/leave",body)});
     redraw();updateOnlineCount();setInterval(updateOnlineCount,5000);if(state.playerId)startPolling();
   </script>
 </body>
