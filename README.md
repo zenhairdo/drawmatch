@@ -28,6 +28,11 @@ valid YouTube URL/video ID. That choice starts the round. Artist clients seek to
 the shared round-start offset and resynchronize every five seconds. Playback
 starts muted to satisfy browser autoplay rules; each artist can turn sound on.
 
+During the round, each artist publishes a compressed preview about four times
+per second. The judge sees both anonymous canvases in contestant order, polls
+for updates every 300 milliseconds, and hears the same timestamp-synchronized
+track. The final archived drawings remain separate from these fading live views.
+
 ## Deploy on Render
 
 This repository includes `render.yaml` for a free Render web service. Push the

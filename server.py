@@ -180,6 +180,17 @@ class GameStore:
                     artist_id != player_id and artist_id in match["drawings"]
                     for artist_id in match["artists"]
                 )
+            if (
+                player["role"] == "judge"
+                and match["mode"] == "speedpaint"
+                and match["status"] == "drawing"
+            ):
+                response["live_drawings"] = [
+                    match["live_drawings"].get(artist) for artist in match["artists"]
+                ]
+                response["live_updated_at"] = [
+                    match["live_updated_at"].get(artist) for artist in match["artists"]
+                ]
             if player["role"] == "judge" and match["status"] in {"judging", "complete"}:
                 response["drawings"] = [match["drawings"][artist] for artist in match["artists"]]
             if match["status"] == "complete":
@@ -228,6 +239,19 @@ class GameStore:
                 deadline=started_at + ROUND_SECONDS,
                 status="drawing",
             )
+
+    def update_live_drawing(self, player_id: str, drawing: str) -> None:
+        if not drawing.startswith(("data:image/webp;base64,", "data:image/jpeg;base64,")):
+            raise ValueError("Live drawing must be a WebP or JPEG image.")
+        with self.lock:
+            player = self._player(player_id)
+            if player["role"] != "artist" or not player["match_id"]:
+                raise ValueError("Only a matched artist can publish a live drawing.")
+            match = self.matches[player["match_id"]]
+            if match["mode"] != "speedpaint" or match["status"] != "drawing":
+                raise ValueError("This speedpaint round is not live.")
+            match["live_drawings"][player_id] = drawing
+            match["live_updated_at"][player_id] = time.time()
 
     def vote(self, player_id: str, choice: int) -> None:
         with self.lock:
@@ -324,6 +348,8 @@ class GameStore:
                         "drawings": {},
                         "winner": None,
                         "blank_drawing": None,
+                        "live_drawings": {},
+                        "live_updated_at": {},
                     }
                     for player_id in [*artists, judge]:
                         self.players[player_id]["status"] = "matched"
@@ -394,6 +420,8 @@ class GameStore:
             "drawings": {},
             "winner": None,
             "blank_drawing": None,
+            "live_drawings": {},
+            "live_updated_at": {},
             "room_code": room["code"],
         }
         room["status"] = "playing"
@@ -488,6 +516,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/leave": self._leave,
             "/api/blank": self._blank,
             "/api/music/select": self._select_music,
+            "/api/live": self._live,
         }
         action = routes.get(urlparse(self.path).path)
         if action is None:
@@ -545,6 +574,11 @@ class Handler(SimpleHTTPRequestHandler):
     def _select_music(self) -> dict:
         body = self._body()
         STORE.select_music(body.get("player_id", ""), body.get("song", ""))
+        return {"ok": True}
+
+    def _live(self) -> dict:
+        body = self._body()
+        STORE.update_live_drawing(body.get("player_id", ""), body.get("drawing", ""))
         return {"ok": True}
 
     def _body(self) -> dict:
