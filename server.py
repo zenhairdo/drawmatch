@@ -22,6 +22,11 @@ HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8000"))
 ROUND_SECONDS = 90
 SPEEDPAINT_FADE_SECONDS = 3
+STAGE_BATTLE_SECONDS = 60
+STAGE_SONG_PHASE_SECONDS = 30
+STAGE_VOTE_SECONDS = 15
+STAGE_WINNER_COOLDOWN_SECONDS = 60
+STAGE_ONLINE_TIMEOUT_SECONDS = 15
 ONLINE_TIMEOUT_SECONDS = 15
 MAX_BODY_BYTES = 6 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent
@@ -484,7 +489,233 @@ class GameStore:
             raise ValueError("Player session not found.") from error
 
 
+class StageStore:
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.players: dict[str, dict] = {}
+        self.stage = self._empty_stage()
+
+    @staticmethod
+    def _empty_stage() -> dict:
+        return {
+            "status": "empty",
+            "performer": None,
+            "challenger": None,
+            "song_id": "",
+            "old_song_id": "",
+            "new_song_id": "",
+            "song_started_at": None,
+            "battle_started_at": None,
+            "battle_deadline": None,
+            "vote_deadline": None,
+            "cooldown_until": 0,
+            "live_drawings": {},
+            "votes": {},
+            "last_winner": None,
+        }
+
+    def join(self, name: str) -> dict:
+        name = GameStore._clean_name(name)
+        with self.lock:
+            self._expire()
+            if any(player["name"].casefold() == name.casefold() for player in self.players.values()):
+                raise ValueError("That stage name is already in use.")
+            player_id = secrets.token_urlsafe(18)
+            self.players[player_id] = {"id": player_id, "name": name, "last_seen": time.time()}
+            return {"stage_player_id": player_id}
+
+    def state_for(self, player_id: str) -> dict:
+        with self.lock:
+            player = self._player(player_id)
+            player["last_seen"] = time.time()
+            self._expire(active_player_id=player_id)
+            stage = self.stage
+            response = {
+                "status": stage["status"],
+                "name": player["name"],
+                "viewer_count": len(self.players),
+                "server_time": time.time(),
+                "fade_seconds": SPEEDPAINT_FADE_SECONDS,
+                "is_performer": player_id == stage["performer"],
+                "is_challenger": player_id == stage["challenger"],
+            }
+            if stage["status"] == "empty":
+                return response
+
+            response.update(
+                performer_name=self.players[stage["performer"]]["name"],
+                song_id=stage["song_id"],
+                song_started_at=stage["song_started_at"],
+                cooldown_until=stage["cooldown_until"],
+                last_winner_name=(
+                    self.players[stage["last_winner"]]["name"]
+                    if stage["last_winner"] in self.players
+                    else None
+                ),
+            )
+            if stage["status"] == "live":
+                response.update(
+                    live_drawing=stage["live_drawings"].get(stage["performer"]),
+                    can_challenge=(
+                        player_id != stage["performer"]
+                        and time.time() >= stage["cooldown_until"]
+                    ),
+                )
+            else:
+                contestants = [stage["performer"], stage["challenger"]]
+                response.update(
+                    contestant_names=[self.players[item]["name"] for item in contestants],
+                    live_drawings=[stage["live_drawings"].get(item) for item in contestants],
+                    old_song_id=stage["old_song_id"],
+                    new_song_id=stage["new_song_id"],
+                    battle_started_at=stage["battle_started_at"],
+                    battle_deadline=stage["battle_deadline"],
+                    song_phase_seconds=STAGE_SONG_PHASE_SECONDS,
+                    contestant_index=(contestants.index(player_id) if player_id in contestants else None),
+                )
+                if stage["status"] == "voting":
+                    response.update(
+                        vote_deadline=stage["vote_deadline"],
+                        can_vote=player_id not in contestants and player_id not in stage["votes"],
+                        vote_counts=[
+                            sum(choice == index for choice in stage["votes"].values())
+                            for index in range(2)
+                        ],
+                    )
+            return response
+
+    def take_stage(self, player_id: str, song: str) -> None:
+        with self.lock:
+            self._player(player_id)
+            if self.stage["status"] != "empty":
+                raise ValueError("The stage already has a performer.")
+            now = time.time()
+            self.stage.update(
+                status="live",
+                performer=player_id,
+                song_id=GameStore._youtube_video_id(song),
+                song_started_at=now,
+                cooldown_until=now,
+                live_drawings={},
+            )
+
+    def challenge(self, player_id: str, song: str) -> None:
+        with self.lock:
+            self._player(player_id)
+            stage = self.stage
+            now = time.time()
+            if stage["status"] != "live":
+                raise ValueError("The stage is not accepting challenges.")
+            if player_id == stage["performer"]:
+                raise ValueError("The stage performer cannot challenge themselves.")
+            if now < stage["cooldown_until"]:
+                raise ValueError("The winner is still in their protected minute.")
+            new_song = GameStore._youtube_video_id(song)
+            stage.update(
+                status="battle",
+                challenger=player_id,
+                old_song_id=stage["song_id"],
+                new_song_id=new_song,
+                battle_started_at=now,
+                battle_deadline=now + STAGE_BATTLE_SECONDS,
+                vote_deadline=None,
+                votes={},
+            )
+            stage["live_drawings"].pop(player_id, None)
+
+    def update_live_drawing(self, player_id: str, drawing: str) -> None:
+        if not drawing.startswith(("data:image/webp;base64,", "data:image/jpeg;base64,")):
+            raise ValueError("Stage drawing must be a WebP or JPEG image.")
+        with self.lock:
+            self._expire()
+            self._player(player_id)
+            stage = self.stage
+            allowed = player_id == stage["performer"] or (
+                stage["status"] == "battle" and player_id == stage["challenger"]
+            )
+            if stage["status"] not in {"live", "battle"} or not allowed:
+                raise ValueError("Only a current stage artist can publish a drawing.")
+            stage["live_drawings"][player_id] = drawing
+
+    def vote(self, player_id: str, choice: int) -> None:
+        with self.lock:
+            self._expire()
+            self._player(player_id)
+            stage = self.stage
+            contestants = {stage["performer"], stage["challenger"]}
+            if stage["status"] != "voting" or choice not in {0, 1}:
+                raise ValueError("Stage voting is not open.")
+            if player_id in contestants:
+                raise ValueError("Contestants cannot vote in their own battle.")
+            if player_id in stage["votes"]:
+                raise ValueError("You already voted in this battle.")
+            stage["votes"][player_id] = choice
+
+    def leave(self, player_id: str) -> None:
+        with self.lock:
+            self._player(player_id)
+            self._remove_player(player_id)
+
+    def _remove_player(self, player_id: str) -> None:
+        stage = self.stage
+        if player_id == stage["performer"]:
+            self.stage = self._empty_stage()
+        elif player_id == stage["challenger"]:
+            now = time.time()
+            stage.update(
+                status="live",
+                challenger=None,
+                song_id=stage["old_song_id"],
+                song_started_at=now,
+                cooldown_until=now,
+                votes={},
+            )
+            stage["live_drawings"].pop(player_id, None)
+        else:
+            stage["votes"].pop(player_id, None)
+        self.players.pop(player_id, None)
+
+    def _expire(self, active_player_id: str | None = None) -> None:
+        stage = self.stage
+        now = time.time()
+        cutoff = now - STAGE_ONLINE_TIMEOUT_SECONDS
+        stale_players = [
+            player_id
+            for player_id, player in self.players.items()
+            if player_id != active_player_id and player["last_seen"] < cutoff
+        ]
+        for player_id in stale_players:
+            self._remove_player(player_id)
+        stage = self.stage
+        if stage["status"] == "battle" and now >= stage["battle_deadline"]:
+            stage["status"] = "voting"
+            stage["vote_deadline"] = now + STAGE_VOTE_SECONDS
+        if stage["status"] == "voting" and now >= stage["vote_deadline"]:
+            incumbent_votes = sum(choice == 0 for choice in stage["votes"].values())
+            challenger_votes = sum(choice == 1 for choice in stage["votes"].values())
+            winner = stage["challenger"] if challenger_votes > incumbent_votes else stage["performer"]
+            winning_drawing = stage["live_drawings"].get(winner)
+            stage.update(
+                status="live",
+                performer=winner,
+                challenger=None,
+                song_id=stage["new_song_id"],
+                song_started_at=now,
+                cooldown_until=now + STAGE_WINNER_COOLDOWN_SECONDS,
+                live_drawings={winner: winning_drawing} if winning_drawing else {},
+                votes={},
+                last_winner=winner,
+            )
+
+    def _player(self, player_id: str) -> dict:
+        try:
+            return self.players[player_id]
+        except KeyError as error:
+            raise ValueError("Stage session not found.") from error
+
+
 STORE = GameStore()
+STAGE = StageStore()
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -500,6 +731,10 @@ class Handler(SimpleHTTPRequestHandler):
             STORE.expire_rounds()
             player_id = parse_qs(parsed.query).get("player_id", [""])[0]
             self._handle(lambda: STORE.state(player_id))
+            return
+        if parsed.path == "/api/stage/state":
+            player_id = parse_qs(parsed.query).get("stage_player_id", [""])[0]
+            self._handle(lambda: STAGE.state_for(player_id))
             return
         if parsed.path == "/":
             self.path = "/index.html"
@@ -517,6 +752,12 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/blank": self._blank,
             "/api/music/select": self._select_music,
             "/api/live": self._live,
+            "/api/stage/join": self._stage_join,
+            "/api/stage/take": self._stage_take,
+            "/api/stage/challenge": self._stage_challenge,
+            "/api/stage/live": self._stage_live,
+            "/api/stage/vote": self._stage_vote,
+            "/api/stage/leave": self._stage_leave,
         }
         action = routes.get(urlparse(self.path).path)
         if action is None:
@@ -579,6 +820,35 @@ class Handler(SimpleHTTPRequestHandler):
     def _live(self) -> dict:
         body = self._body()
         STORE.update_live_drawing(body.get("player_id", ""), body.get("drawing", ""))
+        return {"ok": True}
+
+    def _stage_join(self) -> dict:
+        return STAGE.join(self._body().get("name", ""))
+
+    def _stage_take(self) -> dict:
+        body = self._body()
+        STAGE.take_stage(body.get("stage_player_id", ""), body.get("song", ""))
+        return {"ok": True}
+
+    def _stage_challenge(self) -> dict:
+        body = self._body()
+        STAGE.challenge(body.get("stage_player_id", ""), body.get("song", ""))
+        return {"ok": True}
+
+    def _stage_live(self) -> dict:
+        body = self._body()
+        STAGE.update_live_drawing(
+            body.get("stage_player_id", ""), body.get("drawing", "")
+        )
+        return {"ok": True}
+
+    def _stage_vote(self) -> dict:
+        body = self._body()
+        STAGE.vote(body.get("stage_player_id", ""), body.get("choice"))
+        return {"ok": True}
+
+    def _stage_leave(self) -> dict:
+        STAGE.leave(self._body().get("stage_player_id", ""))
         return {"ok": True}
 
     def _body(self) -> dict:
