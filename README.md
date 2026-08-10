@@ -44,6 +44,23 @@ The home screen has two one-browser previews:
 Both demos generate random live paint for 30 seconds and then continue to the
 normal results view.
 
+## Live stage
+
+Choose **Enter live stage** to watch, perform, challenge, or vote. The first
+artist takes an empty stage with a YouTube song that loops while they draw.
+Stage canvases use the same three-second oldest-first disappearing ink and send
+compressed live frames to the audience four times per second.
+
+A viewer can challenge the incumbent with a new YouTube song when the stage is
+unlocked. The battle lasts 60 seconds: 30 seconds of the incumbent's song,
+followed by 30 seconds of the challenger's song. Non-contestant viewers then
+have 15 seconds to vote. A tie keeps the incumbent on stage. The winner loops
+the challenger's new song and receives 60 seconds of protection before another
+challenge can begin.
+
+Like matchmaking, stage sessions and votes are held in memory and reset when
+the server restarts.
+
 ## Deploy on Render
 
 This repository includes `render.yaml` for a free Render web service. Push the
