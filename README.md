@@ -26,7 +26,7 @@ YOUTUBE_TRACKS="video_id_one,video_id_two" python3 server.py
 
 After matchmaking, the judge chooses one of these playlist tracks or pastes any
 valid YouTube URL/video ID. That choice starts the round. Artist clients seek to
-the shared round-start offset and resynchronize every five seconds. The client
+the shared round-start offset and resynchronize every second. The client
 attempts audible autoplay first. If a browser blocks it, a **Play music** button
 appears so playback can be unlocked with one user gesture.
 
@@ -49,14 +49,17 @@ normal results view.
 Choose **Enter live stage** to watch, perform, challenge, or vote. The first
 artist takes an empty stage with a YouTube song that loops while they draw.
 Stage canvases use the same three-second oldest-first disappearing ink and send
-compressed live frames to the audience four times per second.
+downscaled compressed live frames to the audience up to ten times per second.
+Polling and uploads never overlap, preventing slow requests from creating a
+backlog of stale frames.
 
 A viewer can challenge the incumbent with a new YouTube song when the stage is
-unlocked. The battle lasts 60 seconds: 30 seconds of the incumbent's song,
-followed by 30 seconds of the challenger's song. Non-contestant viewers then
-have 15 seconds to vote. A tie keeps the incumbent on stage. The winner loops
-the challenger's new song and receives 60 seconds of protection before another
-challenge can begin.
+unlocked. The incumbent's already-playing song continues uninterrupted for 30
+seconds, followed by the challenger's song. Non-contestant viewers then have 15
+seconds to vote while both contestants keep drawing and the challenger song
+continues. A tie keeps the incumbent on stage. The winner keeps the challenger
+song playing from the same position, loops it, and receives 60 seconds of
+protection before another challenge can begin.
 
 Like matchmaking, stage sessions and votes are held in memory and reset when
 the server restarts. Closing a stage tab sends an immediate leave signal; a
