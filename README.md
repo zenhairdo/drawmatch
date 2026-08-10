@@ -25,8 +25,9 @@ YOUTUBE_TRACKS="video_id_one,video_id_two" python3 server.py
 
 After matchmaking, the judge chooses one of these playlist tracks or pastes any
 valid YouTube URL/video ID. That choice starts the round. Artist clients seek to
-the shared round-start offset and resynchronize every five seconds. Playback
-starts muted to satisfy browser autoplay rules; each artist can turn sound on.
+the shared round-start offset and resynchronize every five seconds. The client
+attempts audible autoplay first. If a browser blocks it, a **Play music** button
+appears so playback can be unlocked with one user gesture.
 
 During the round, each artist publishes a compressed preview about four times
 per second. The judge sees both anonymous canvases in contestant order, polls
