@@ -42,7 +42,7 @@
     .tool,.tools input[type=color] { width:46px; height:42px; padding:3px; border:1px solid var(--line); border-radius:5px; background:white; font-weight:900; }
     .size { writing-mode:vertical-lr; direction:rtl; height:130px; margin-left:12px; }
     canvas { display:block; width:100%; aspect-ratio:4/3; border:1px solid #b9c0c5; background:white; touch-action:none; cursor:crosshair; }
-    .draw-actions { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-top:14px; } .draw-actions span { color:var(--muted); font-size:13px; }
+    .draw-actions { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-top:14px; } .draw-actions span { color:var(--muted); font-size:13px; } .draw-buttons { display:flex; gap:10px; }
     .submissions { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:26px; }
     .submission { padding:0; overflow:hidden; border:2px solid transparent; border-radius:6px; background:white; text-align:left; } button.submission:hover { border-color:var(--cyan); }
     .submission img { display:block; width:100%; aspect-ratio:4/3; object-fit:contain; background:white; } .submission span { display:block; padding:14px; border-top:1px solid var(--line); font-weight:850; }
@@ -75,7 +75,7 @@
     <section id="drawView" hidden>
       <div class="round-head"><div><div class="prompt-label">Your prompt</div><div id="drawPrompt" class="prompt"></div></div><div id="timer" class="timer">01:30</div></div>
       <div class="draw-layout"><div class="tools"><input id="color" type="color" value="#191b20" title="Brush color"><button id="undo" class="tool" title="Undo">↶</button><button id="clear" class="tool" title="Clear">×</button><input id="size" class="size" type="range" min="1" max="32" value="5" title="Brush size"></div><canvas id="canvas" width="1200" height="900"></canvas></div>
-      <div class="draw-actions"><span>Your opponent cannot see your canvas.</span><button id="submit" class="primary">Submit drawing</button></div>
+      <div class="draw-actions"><span>Your opponent cannot see your canvas.</span><div class="draw-buttons"><button id="saveArtwork" class="secondary" type="button">Save artwork</button><button id="submit" class="primary">Submit drawing</button></div></div>
     </section>
 
     <section id="waitView" class="center" hidden><div class="center-inner"><div class="queue-role">✓</div><h1 id="waitTitle">Drawing locked</h1><p id="waitCopy">Waiting for the other artist to submit.</p></div></section>
@@ -114,6 +114,7 @@
     function updateTimer(deadline){const seconds=Math.max(0,Math.ceil(deadline-Date.now()/1000)),m=String(Math.floor(seconds/60)).padStart(2,"0"),s=String(seconds%60).padStart(2,"0");$("timer").textContent=`${m}:${s}`;$("timer").classList.toggle("warning",seconds<=10)}
     function point(event){const rect=canvas.getBoundingClientRect();return{x:(event.clientX-rect.left)*canvas.width/rect.width,y:(event.clientY-rect.top)*canvas.height/rect.height}}
     function redraw(){ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.lineCap="round";ctx.lineJoin="round";state.strokes.forEach(stroke=>{ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.size;ctx.beginPath();ctx.moveTo(stroke.points[0].x,stroke.points[0].y);stroke.points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(stroke.points.length===1)ctx.lineTo(stroke.points[0].x+.01,stroke.points[0].y+.01);ctx.stroke()})}
+    function saveArtwork(){const link=document.createElement("a"),timestamp=new Date().toISOString().replace(/[:.]/g,"-");link.download=`drawmatch-artwork-${timestamp}.png`;link.href=canvas.toDataURL("image/png");link.click()}
     function renderJudging(data){if(state.lastStatus==="judging")return;show("judgeView");$("judgePrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;$("judgeDrawings").innerHTML=data.drawings.map((image,index)=>`<button class="submission" data-vote="${index}"><img src="${image}" alt="Anonymous drawing ${index+1}"><span>Choose drawing ${index+1}</span></button>`).join("");document.querySelectorAll("[data-vote]").forEach(button=>button.onclick=async()=>{button.disabled=true;await api("/api/vote",{player_id:state.playerId,choice:Number(button.dataset.vote)});poll()})}
     function escapeHtml(value){const div=document.createElement("div");div.textContent=value;return div.innerHTML}
     function renderResult(data){if(state.lastStatus==="complete")return;show("resultView");$("winner").textContent=`${data.winner} wins`;$("resultDrawings").innerHTML=data.drawings.map((image,index)=>`<div class="submission"><img src="${image}" alt="Drawing by ${escapeHtml(data.artists[index])}"><span>${escapeHtml(data.artists[index])}${data.artists[index]===data.winner?" · Winner":""}</span></div>`).join("")}
@@ -127,7 +128,7 @@
     $("createRoom").onclick=()=>enterMatch("/api/room/create",{name:$("name").value,role:state.role,mode:state.mode,artist_count:state.artistCount});
     $("leaveButton").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
     canvas.onpointerdown=event=>{canvas.setPointerCapture(event.pointerId);state.stroke={color:$("color").value,size:Number($("size").value),points:[point(event)]};state.strokes.push(state.stroke)};canvas.onpointermove=event=>{if(!state.stroke)return;state.stroke.points.push(point(event));redraw()};canvas.onpointerup=canvas.onpointercancel=()=>state.stroke=null;
-    $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};
+    $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};$("saveArtwork").onclick=saveArtwork;
     $("submit").onclick=async()=>{$("submit").disabled=true;try{await api("/api/submit",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")});state.submitted=true;poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
     $("requeue").onclick=async()=>{state.lastStatus=null;await api("/api/requeue",{player_id:state.playerId});poll()};$("leaveMatch").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
     redraw();updateOnlineCount();setInterval(updateOnlineCount,5000);if(state.playerId)startPolling();
