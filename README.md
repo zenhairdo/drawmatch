@@ -13,8 +13,9 @@ Open `http://localhost:8000` in three separate browsers or private windows.
 
 ## Speedpaint music
 
-Speedpaint matches always use two artists and one judge. Each visible stroke
-fades after three seconds, while the complete drawing is preserved for judging.
+Speedpaint matches always use two artists and one judge. Each visible line
+segment remains fully visible for three seconds, then the oldest segments are
+removed first while the complete drawing is preserved for judging.
 
 Set `YOUTUBE_TRACKS` to one or more comma-separated, embeddable YouTube video
 IDs before starting the server:
@@ -25,13 +26,42 @@ YOUTUBE_TRACKS="video_id_one,video_id_two" python3 server.py
 
 After matchmaking, the judge chooses one of these playlist tracks or pastes any
 valid YouTube URL/video ID. That choice starts the round. Artist clients seek to
-the shared round-start offset and resynchronize every five seconds. Playback
-starts muted to satisfy browser autoplay rules; each artist can turn sound on.
+the shared round-start offset and resynchronize every five seconds. The client
+attempts audible autoplay first. If a browser blocks it, a **Play music** button
+appears so playback can be unlocked with one user gesture.
 
 During the round, each artist publishes a compressed preview about four times
 per second. The judge sees both anonymous canvases in contestant order, polls
 for updates every 300 milliseconds, and hears the same timestamp-synchronized
-track. The final archived drawings remain separate from these fading live views.
+track. The final archived drawings remain separate from these expiring live views.
+
+The home screen has two one-browser previews:
+
+- **Watch bot speedpaint** removes the oldest segments after three seconds and
+  supports optional YouTube music.
+- **Watch bot drawing match** shows two bots building persistent paintings.
+
+Both demos generate random live paint for 30 seconds and then continue to the
+normal results view.
+
+## Live stage
+
+Choose **Enter live stage** to watch, perform, challenge, or vote. The first
+artist takes an empty stage with a YouTube song that loops while they draw.
+Stage canvases use the same three-second oldest-first disappearing ink and send
+compressed live frames to the audience four times per second.
+
+A viewer can challenge the incumbent with a new YouTube song when the stage is
+unlocked. The battle lasts 60 seconds: 30 seconds of the incumbent's song,
+followed by 30 seconds of the challenger's song. Non-contestant viewers then
+have 15 seconds to vote. A tie keeps the incumbent on stage. The winner loops
+the challenger's new song and receives 60 seconds of protection before another
+challenge can begin.
+
+Like matchmaking, stage sessions and votes are held in memory and reset when
+the server restarts. Closing a stage tab sends an immediate leave signal; a
+15-second heartbeat timeout removes disconnected performers, challengers, and
+viewers if that signal cannot be delivered.
 
 ## Deploy on Render
 
