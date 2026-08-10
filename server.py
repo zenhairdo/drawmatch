@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import secrets
 import string
 import threading
@@ -20,9 +21,15 @@ from urllib.parse import parse_qs, urlparse
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8000"))
 ROUND_SECONDS = 90
+SPEEDPAINT_FADE_SECONDS = 3
 ONLINE_TIMEOUT_SECONDS = 15
 MAX_BODY_BYTES = 6 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent
+YOUTUBE_TRACKS = tuple(
+    item.strip()
+    for item in os.environ.get("YOUTUBE_TRACKS", "").split(",")
+    if item.strip()
+)
 PROMPTS = (
     "A lighthouse on another planet",
     "The world's worst superhero",
@@ -43,8 +50,9 @@ class GameStore:
         self.rooms: dict[str, dict] = {}
         self.queues = {
             (mode, artist_count, role): deque()
-            for mode in ("prompted", "promptless")
+            for mode in ("prompted", "promptless", "speedpaint")
             for artist_count in (2, 4)
+            if mode != "speedpaint" or artist_count == 2
             for role in ("artist", "judge")
         }
     def join(self, name: str, role: str, mode: str, artist_count: int) -> dict:
@@ -158,6 +166,14 @@ class GameStore:
                 "deadline": match["deadline"],
                 "submitted": player_id in match["drawings"],
             }
+            if match["mode"] == "speedpaint":
+                response.update(
+                    fade_seconds=SPEEDPAINT_FADE_SECONDS,
+                    music_video_id=match["music_video_id"],
+                    round_started_at=match["round_started_at"],
+                )
+                if player["role"] == "judge" and match["status"] == "song_select":
+                    response["music_choices"] = list(YOUTUBE_TRACKS)
 
             if player["role"] == "artist":
                 response["opponent_submitted"] = any(
@@ -195,6 +211,23 @@ class GameStore:
             match["drawings"][player_id] = drawing
             if all(artist in match["drawings"] for artist in match["artists"]):
                 match["status"] = "judging"
+
+    def select_music(self, player_id: str, song: str) -> None:
+        with self.lock:
+            player = self._player(player_id)
+            if player["role"] != "judge" or not player["match_id"]:
+                raise ValueError("Only the match judge can choose the song.")
+            match = self.matches[player["match_id"]]
+            if match["mode"] != "speedpaint" or match["status"] != "song_select":
+                raise ValueError("This match is not waiting for a song.")
+            video_id = self._youtube_video_id(song)
+            started_at = time.time()
+            match.update(
+                music_video_id=video_id,
+                round_started_at=started_at,
+                deadline=started_at + ROUND_SECONDS,
+                status="drawing",
+            )
 
     def vote(self, player_id: str, choice: int) -> None:
         with self.lock:
@@ -267,23 +300,27 @@ class GameStore:
                 self.matches[player["match_id"]]["blank_drawing"] = drawing
 
     def _make_matches(self) -> None:
-        for mode in ("prompted", "promptless"):
-            for artist_count in (2, 4):
+        for mode in ("prompted", "promptless", "speedpaint"):
+            for artist_count in ((2,) if mode == "speedpaint" else (2, 4)):
                 artists_queue = self._queue_for("artist", mode, artist_count)
                 judges_queue = self._queue_for("judge", mode, artist_count)
                 while len(artists_queue) >= artist_count and judges_queue:
                     artists = [artists_queue.popleft() for _ in range(artist_count)]
                     judge = judges_queue.popleft()
                     match_id = secrets.token_urlsafe(12)
+                    speedpaint = mode == "speedpaint"
+                    started_at = None if speedpaint else time.time()
                     self.matches[match_id] = {
                         "id": match_id,
                         "artists": artists,
                         "artist_count": artist_count,
                         "judge": judge,
                         "mode": mode,
-                        "prompt": random.choice(PROMPTS) if mode == "prompted" else "",
-                        "deadline": time.time() + ROUND_SECONDS,
-                        "status": "drawing",
+                        "prompt": random.choice(PROMPTS) if mode != "promptless" else "",
+                        "round_started_at": started_at,
+                        "deadline": None if speedpaint else started_at + ROUND_SECONDS,
+                        "music_video_id": "",
+                        "status": "song_select" if speedpaint else "drawing",
                         "drawings": {},
                         "winner": None,
                         "blank_drawing": None,
@@ -341,15 +378,19 @@ class GameStore:
         if len(room["artists"]) != room["artist_count"] or room["judge"] is None:
             return
         match_id = secrets.token_urlsafe(12)
+        speedpaint = room["mode"] == "speedpaint"
+        started_at = None if speedpaint else time.time()
         self.matches[match_id] = {
             "id": match_id,
             "artists": list(room["artists"]),
             "artist_count": room["artist_count"],
             "judge": room["judge"],
             "mode": room["mode"],
-            "prompt": random.choice(PROMPTS) if room["mode"] == "prompted" else "",
-            "deadline": time.time() + ROUND_SECONDS,
-            "status": "drawing",
+            "prompt": random.choice(PROMPTS) if room["mode"] != "promptless" else "",
+            "round_started_at": started_at,
+            "deadline": None if speedpaint else started_at + ROUND_SECONDS,
+            "music_video_id": "",
+            "status": "song_select" if speedpaint else "drawing",
             "drawings": {},
             "winner": None,
             "blank_drawing": None,
@@ -371,8 +412,10 @@ class GameStore:
     def _validate_role_mode(role: str, mode: str, artist_count: int) -> None:
         if role not in {"artist", "judge"}:
             raise ValueError("Choose artist or judge.")
-        if mode not in {"prompted", "promptless"}:
-            raise ValueError("Choose prompted or promptless.")
+        if mode not in {"prompted", "promptless", "speedpaint"}:
+            raise ValueError("Choose prompted, promptless, or speedpaint.")
+        if mode == "speedpaint" and artist_count != 2:
+            raise ValueError("Speedpaint is a two-artist competition.")
         if artist_count not in {2, 4}:
             raise ValueError("Choose two or four artists.")
 
@@ -382,6 +425,26 @@ class GameStore:
         if not name:
             raise ValueError("Enter a username.")
         return name
+
+    @staticmethod
+    def _youtube_video_id(value: str) -> str:
+        value = value.strip()
+        parsed = urlparse(value if "://" in value else f"https://youtube.com/watch?v={value}")
+        host = parsed.netloc.lower().removeprefix("www.")
+        if host == "youtu.be":
+            video_id = parsed.path.strip("/").split("/")[0]
+        elif host in {"youtube.com", "m.youtube.com", "music.youtube.com"}:
+            if parsed.path == "/watch":
+                video_id = parse_qs(parsed.query).get("v", [""])[0]
+            elif parsed.path.startswith(("/embed/", "/shorts/")):
+                video_id = parsed.path.split("/")[2]
+            else:
+                video_id = ""
+        else:
+            video_id = ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            raise ValueError("Enter a valid YouTube video URL or 11-character video ID.")
+        return video_id
 
     def _queue_for(self, role: str, mode: str, artist_count: int) -> deque[str]:
         return self.queues[(mode, artist_count, role)]
@@ -424,6 +487,7 @@ class Handler(SimpleHTTPRequestHandler):
             "/api/requeue": self._requeue,
             "/api/leave": self._leave,
             "/api/blank": self._blank,
+            "/api/music/select": self._select_music,
         }
         action = routes.get(urlparse(self.path).path)
         if action is None:
@@ -476,6 +540,11 @@ class Handler(SimpleHTTPRequestHandler):
     def _blank(self) -> dict:
         body = self._body()
         STORE.set_blank(body.get("player_id", ""), body.get("drawing", ""))
+        return {"ok": True}
+
+    def _select_music(self) -> dict:
+        body = self._body()
+        STORE.select_music(body.get("player_id", ""), body.get("song", ""))
         return {"ok": True}
 
     def _body(self) -> dict:

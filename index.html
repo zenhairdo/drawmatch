@@ -23,6 +23,7 @@
     input[type=text] { width:100%; height:48px; padding:0 13px; border:1px solid #abb2b8; border-radius:4px; background:white; }
     input:focus { outline:3px solid rgba(22,141,163,.18); border-color:var(--cyan); }
     .roles { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:18px 0; padding:4px; background:#e3e7e9; border-radius:6px; }
+    .round-modes { grid-template-columns:repeat(3,1fr); }
     .roles button { height:43px; border:0; border-radius:4px; background:transparent; color:#535b61; font-weight:800; } .roles .active { background:white; color:var(--ink); box-shadow:0 1px 4px #0002; }
     .primary,.secondary { min-height:44px; padding:0 18px; border-radius:5px; font-weight:800; }
     .primary { border:0; color:white; background:var(--ink); } .primary:hover { background:#30343b; } .secondary { border:1px solid #abb2b8; background:white; }
@@ -43,6 +44,11 @@
     .size { writing-mode:vertical-lr; direction:rtl; height:130px; margin-left:12px; }
     canvas { display:block; width:100%; aspect-ratio:4/3; border:1px solid #b9c0c5; background:white; touch-action:none; cursor:crosshair; }
     .draw-actions { display:flex; justify-content:space-between; align-items:center; gap:18px; margin-top:14px; } .draw-actions span { color:var(--muted); font-size:13px; } .draw-buttons { display:flex; gap:10px; }
+    .speedpaint-note { margin:0 0 14px; padding:12px 14px; border-left:4px solid var(--coral); background:white; color:var(--muted); font-size:14px; }
+    .music { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 14px; padding:10px 12px; border:1px solid var(--line); background:white; }
+    #youtubePlayer { position:absolute; width:1px; height:1px; overflow:hidden; opacity:.01; pointer-events:none; }
+    .song-form { display:grid; grid-template-columns:1fr auto; gap:10px; margin-top:22px; text-align:left; }
+    .song-choices { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:16px; }
     .submissions { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:26px; }
     .submission { padding:0; overflow:hidden; border:2px solid transparent; border-radius:6px; background:white; text-align:left; } button.submission:hover { border-color:var(--cyan); }
     .submission img { display:block; width:100%; aspect-ratio:4/3; object-fit:contain; background:white; } .submission span { display:block; padding:14px; border-top:1px solid var(--line); font-weight:850; }
@@ -59,7 +65,7 @@
         <form id="joinForm" class="join-form">
           <label for="name">USERNAME</label><input id="name" type="text" maxlength="20" autocomplete="off" required>
           <div class="roles"><button id="artistRole" type="button" class="active">Artist</button><button id="judgeRole" type="button">Judge</button></div>
-          <label>ROUND MODE</label><div class="roles"><button id="promptedMode" type="button" class="active">Prompted</button><button id="promptlessMode" type="button">Promptless</button></div>
+          <label>ROUND MODE</label><div class="roles round-modes"><button id="promptedMode" type="button" class="active">Prompted</button><button id="promptlessMode" type="button">Promptless</button><button id="speedpaintMode" type="button">Speedpaint</button></div>
           <label>ARTISTS PER MATCH</label><div class="roles"><button id="twoArtists" type="button" class="active">2 Artists</button><button id="fourArtists" type="button">4 Artists</button></div>
           <label>MATCH TYPE</label><div class="roles"><button id="publicMatch" type="button" class="active">Public queue</button><button id="privateMatch" type="button">Private room</button></div>
           <div id="privateRoom" class="private-room" hidden><input id="roomCode" type="text" maxlength="6" placeholder="ROOM CODE" aria-label="Private room code"><button id="joinRoom" class="secondary" type="submit">Join</button><button id="createRoom" class="secondary" type="button">Create</button></div>
@@ -74,11 +80,15 @@
 
     <section id="drawView" hidden>
       <div class="round-head"><div><div class="prompt-label">Your prompt</div><div id="drawPrompt" class="prompt"></div></div><div id="timer" class="timer">01:30</div></div>
+      <p id="speedpaintNote" class="speedpaint-note" hidden>Speedpaint: every line disappears three seconds after you draw it. Your complete artwork is still preserved for the judge.</p>
+      <div id="musicPanel" class="music" hidden><span id="musicStatus">Synchronizing music…</span><button id="musicToggle" class="secondary" type="button">Turn sound on</button><div id="youtubePlayer"></div></div>
       <div class="draw-layout"><div class="tools"><input id="color" type="color" value="#191b20" title="Brush color"><button id="undo" class="tool" title="Undo">↶</button><button id="clear" class="tool" title="Clear">×</button><input id="size" class="size" type="range" min="1" max="32" value="5" title="Brush size"></div><canvas id="canvas" width="1200" height="900"></canvas></div>
       <div class="draw-actions"><span>Your opponent cannot see your canvas.</span><div class="draw-buttons"><button id="saveArtwork" class="secondary" type="button">Save artwork</button><button id="submit" class="primary">Submit drawing</button></div></div>
     </section>
 
     <section id="waitView" class="center" hidden><div class="center-inner"><div class="queue-role">✓</div><h1 id="waitTitle">Drawing locked</h1><p id="waitCopy">Waiting for the other artist to submit.</p></div></section>
+    <section id="songWaitView" class="center" hidden><div class="center-inner"><div class="queue-role">♫</div><h1>The judge is picking the song</h1><p>Your speedpaint round will begin for both artists at the same time.</p><div id="songWaitPrompt" class="prompt"></div></div></section>
+    <section id="songSelectView" class="center" hidden><div class="center-inner"><div class="queue-role judge">♫</div><h1>Pick the speedpaint song</h1><p>Paste a YouTube URL or video ID. The drawing timer starts as soon as you choose.</p><div id="songSelectPrompt" class="prompt"></div><div id="songChoices" class="song-choices"></div><form id="songForm" class="song-form"><input id="songInput" type="text" placeholder="YouTube URL or video ID" aria-label="YouTube song" required><button id="startSpeedpaint" class="primary" type="submit">Start round</button></form><div id="songError" class="error"></div></div></section>
     <section id="judgeWaitView" class="center" hidden><div class="center-inner"><div class="queue-role judge">J</div><h1>The artists are drawing</h1><p id="judgeWaitCopy"></p><div class="prompt" id="judgeWaitPrompt"></div></div></section>
 
     <section id="judgeView" hidden><div class="prompt-label">Judge the prompt</div><h1 id="judgePrompt"></h1><p>Choose the strongest response. Names stay hidden until your vote is final.</p><div id="judgeDrawings" class="submissions"></div></section>
@@ -86,13 +96,14 @@
   </main>
 
   <script>
-    const views=["joinView","queueView","drawView","waitView","judgeWaitView","judgeView","resultView"], $=id=>document.getElementById(id);
-    const state={role:"artist",mode:"prompted",artistCount:2,matchType:"public",playerId:sessionStorage.getItem("drawmatchPlayer"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false};
-    const canvas=$("canvas"),ctx=canvas.getContext("2d");
+    const views=["joinView","queueView","drawView","waitView","songWaitView","songSelectView","judgeWaitView","judgeView","resultView"], $=id=>document.getElementById(id);
+    const state={role:"artist",mode:"prompted",artistCount:2,matchType:"public",playerId:sessionStorage.getItem("drawmatchPlayer"),strokes:[],stroke:null,lastStatus:null,poll:null,submitted:false,fadeSeconds:3,animation:null,musicVideoId:"",roundStartedAt:0};
+    const canvas=$("canvas"),ctx=canvas.getContext("2d"),archiveCanvas=document.createElement("canvas"),archiveCtx=archiveCanvas.getContext("2d");archiveCanvas.width=canvas.width;archiveCanvas.height=canvas.height;
+    let musicPlayer=null,musicReady=false,musicSyncTimer=null;
     function show(id){views.forEach(view=>$(view).hidden=view!==id)}
     function role(role){state.role=role;$("artistRole").classList.toggle("active",role==="artist");$("judgeRole").classList.toggle("active",role==="judge")}
-    function mode(mode){state.mode=mode;$("promptedMode").classList.toggle("active",mode==="prompted");$("promptlessMode").classList.toggle("active",mode==="promptless")}
-    function artistCount(count){state.artistCount=count;$("twoArtists").classList.toggle("active",count===2);$("fourArtists").classList.toggle("active",count===4)}
+    function mode(mode){state.mode=mode;$("promptedMode").classList.toggle("active",mode==="prompted");$("promptlessMode").classList.toggle("active",mode==="promptless");$("speedpaintMode").classList.toggle("active",mode==="speedpaint");$("fourArtists").disabled=mode==="speedpaint";if(mode==="speedpaint")artistCount(2)}
+    function artistCount(count){if(state.mode==="speedpaint")count=2;state.artistCount=count;$("twoArtists").classList.toggle("active",count===2);$("fourArtists").classList.toggle("active",count===4)}
     function matchType(type){state.matchType=type;$("publicMatch").classList.toggle("active",type==="public");$("privateMatch").classList.toggle("active",type==="private");$("privateRoom").hidden=type!=="private";$("joinButton").hidden=type==="private"}
     async function api(path,body){const options=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{};const response=await fetch(path,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
     function setConnection(ok){$("connection").textContent=ok?"Connected":"Reconnecting…";$("connection").classList.toggle("offline",!ok)}
@@ -102,6 +113,8 @@
     function renderState(data){
       if(data.status==="queued"){show("queueView");$("queueIcon").textContent=data.role==="artist"?"A":"J";$("queueIcon").classList.toggle("judge",data.role==="judge");$("queueCopy").textContent=`${data.name}, you are number ${data.position} in the ${data.mode} ${data.artist_count}-artist ${data.role} queue.`;$("artistsWaiting").textContent=data.artists_waiting;$("judgesWaiting").textContent=data.judges_waiting}
       else if(data.status==="room"){show("queueView");$("queueIcon").textContent=data.role==="artist"?"A":"J";$("queueIcon").classList.toggle("judge",data.role==="judge");$("queueCopy").textContent=`Private room ${data.room_code} · Share this code with your players.`;$("artistsWaiting").textContent=data.artists_waiting;$("judgesWaiting").textContent=data.judges_waiting}
+      else if(data.status==="song_select"&&data.role==="judge")renderSongSelect(data)
+      else if(data.status==="song_select"){show("songWaitView");$("songWaitPrompt").textContent=data.prompt}
       else if(data.status==="drawing"&&data.role==="artist"&&!data.submitted){if(state.lastStatus!=="drawing")beginRound(data);updateTimer(data.deadline)}
       else if(data.status==="drawing"&&data.role==="artist"){show("waitView");$("waitCopy").textContent=data.opponent_submitted?"All drawings are in. Preparing the judge’s view…":"Waiting for the other artists to submit."}
       else if(data.status==="drawing"&&data.role==="judge"){show("judgeWaitView");$("judgeWaitPrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;$("judgeWaitCopy").textContent="You’ll receive the drawings as soon as they are submitted.";updateTimer(data.deadline)}
@@ -110,26 +123,39 @@
       else if(data.status==="complete")renderResult(data);else if(data.status==="left"){resetSession()}
       state.lastStatus=data.status;
     }
-    function beginRound(data){show("drawView");$("drawPrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;state.strokes=[];state.submitted=false;redraw();api("/api/blank",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")}).catch(()=>{})}
+    function beginRound(data){show("drawView");$("drawPrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;state.mode=data.mode;state.fadeSeconds=data.fade_seconds||3;state.musicVideoId=data.music_video_id||"";state.roundStartedAt=data.round_started_at||0;state.strokes=[];state.submitted=false;$("speedpaintNote").hidden=data.mode!=="speedpaint";resetCanvases();startFadeLoop();startMusic();api("/api/blank",{player_id:state.playerId,drawing:drawingData()}).catch(()=>{})}
     function updateTimer(deadline){const seconds=Math.max(0,Math.ceil(deadline-Date.now()/1000)),m=String(Math.floor(seconds/60)).padStart(2,"0"),s=String(seconds%60).padStart(2,"0");$("timer").textContent=`${m}:${s}`;$("timer").classList.toggle("warning",seconds<=10)}
     function point(event){const rect=canvas.getBoundingClientRect();return{x:(event.clientX-rect.left)*canvas.width/rect.width,y:(event.clientY-rect.top)*canvas.height/rect.height}}
-    function redraw(){ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.lineCap="round";ctx.lineJoin="round";state.strokes.forEach(stroke=>{ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.size;ctx.beginPath();ctx.moveTo(stroke.points[0].x,stroke.points[0].y);stroke.points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(stroke.points.length===1)ctx.lineTo(stroke.points[0].x+.01,stroke.points[0].y+.01);ctx.stroke()})}
-    function saveArtwork(){const link=document.createElement("a"),timestamp=new Date().toISOString().replace(/[:.]/g,"-");link.download=`drawmatch-artwork-${timestamp}.png`;link.href=canvas.toDataURL("image/png");link.click()}
+    function paint(target,visibleOnly=false){const now=performance.now(),lifetime=state.fadeSeconds*1000,fadeWindow=Math.min(750,lifetime);target.fillStyle="#fff";target.fillRect(0,0,canvas.width,canvas.height);target.lineCap="round";target.lineJoin="round";state.strokes.forEach(stroke=>{target.strokeStyle=stroke.color;target.lineWidth=stroke.size;if(stroke.points.length===1){const point=stroke.points[0],age=now-point.bornAt;if(!visibleOnly||age<lifetime){target.globalAlpha=visibleOnly?Math.min(1,(lifetime-age)/fadeWindow):1;target.beginPath();target.moveTo(point.x,point.y);target.lineTo(point.x+.01,point.y+.01);target.stroke()}}else stroke.points.slice(1).forEach((point,index)=>{const previous=stroke.points[index],age=now-point.bornAt;if(visibleOnly&&age>=lifetime)return;target.globalAlpha=visibleOnly?Math.min(1,(lifetime-age)/fadeWindow):1;target.beginPath();target.moveTo(previous.x,previous.y);target.lineTo(point.x,point.y);target.stroke()})});target.globalAlpha=1}
+    function redraw(){paint(ctx,state.mode==="speedpaint");paint(archiveCtx)}
+    function resetCanvases(){redraw()}
+    function startFadeLoop(){cancelAnimationFrame(state.animation);if(state.mode!=="speedpaint")return;const frame=()=>{paint(ctx,true);state.animation=requestAnimationFrame(frame)};state.animation=requestAnimationFrame(frame)}
+    function drawingData(){return(state.mode==="speedpaint"?archiveCanvas:canvas).toDataURL("image/png")}
+    function saveArtwork(){const link=document.createElement("a"),timestamp=new Date().toISOString().replace(/[:.]/g,"-");link.download=`drawmatch-artwork-${timestamp}.png`;link.href=drawingData();link.click()}
+    function renderSongSelect(data){show("songSelectView");$("songSelectPrompt").textContent=data.prompt;$("songChoices").innerHTML=(data.music_choices||[]).map((id,index)=>`<button class="secondary" type="button" data-song="${escapeHtml(id)}">Playlist track ${index+1}</button>`).join("");document.querySelectorAll("[data-song]").forEach(button=>button.onclick=()=>chooseSong(button.dataset.song))}
+    async function chooseSong(song){$("startSpeedpaint").disabled=true;$("songError").textContent="";try{await api("/api/music/select",{player_id:state.playerId,song});poll()}catch(error){$("songError").textContent=error.message}finally{$("startSpeedpaint").disabled=false}}
+    function loadYouTubeApi(){if(window.YT?.Player)return Promise.resolve();return new Promise(resolve=>{const previous=window.onYouTubeIframeAPIReady;window.onYouTubeIframeAPIReady=()=>{if(previous)previous();resolve()};if(!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')){const script=document.createElement("script");script.src="https://www.youtube.com/iframe_api";document.head.appendChild(script)}})}
+    function musicOffset(){return Math.max(0,Date.now()/1000-state.roundStartedAt)}
+    function syncMusic(){if(!musicReady||!musicPlayer||!state.musicVideoId)return;const offset=musicOffset(),duration=musicPlayer.getDuration?.()||0,target=duration?offset%duration:offset,current=musicPlayer.getCurrentTime?.()||0;if(Math.abs(current-target)>1.5)musicPlayer.seekTo(target,true)}
+    async function startMusic(){clearInterval(musicSyncTimer);$("musicPanel").hidden=state.mode!=="speedpaint";if(state.mode!=="speedpaint")return;if(!state.musicVideoId){$("musicStatus").textContent="No YouTube track configured";$("musicToggle").disabled=true;return}$("musicStatus").textContent="Synchronizing music…";$("musicToggle").disabled=false;await loadYouTubeApi();const ready=event=>{musicReady=true;event.target.mute();syncMusic();event.target.playVideo();$("musicStatus").textContent="Music synchronized";musicSyncTimer=setInterval(syncMusic,5000)};if(musicPlayer&&musicReady){musicPlayer.loadVideoById({videoId:state.musicVideoId,startSeconds:musicOffset()});musicPlayer.mute();syncMusic();musicPlayer.playVideo();$("musicStatus").textContent="Music synchronized";musicSyncTimer=setInterval(syncMusic,5000);return}musicReady=false;musicPlayer=new YT.Player("youtubePlayer",{height:"1",width:"1",videoId:state.musicVideoId,playerVars:{autoplay:1,controls:0,disablekb:1,playsinline:1},events:{onReady:ready}})}
     function renderJudging(data){if(state.lastStatus==="judging")return;show("judgeView");$("judgePrompt").textContent=data.mode==="promptless"?"Free draw":data.prompt;$("judgeDrawings").innerHTML=data.drawings.map((image,index)=>`<button class="submission" data-vote="${index}"><img src="${image}" alt="Anonymous drawing ${index+1}"><span>Choose drawing ${index+1}</span></button>`).join("");document.querySelectorAll("[data-vote]").forEach(button=>button.onclick=async()=>{button.disabled=true;await api("/api/vote",{player_id:state.playerId,choice:Number(button.dataset.vote)});poll()})}
     function escapeHtml(value){const div=document.createElement("div");div.textContent=value;return div.innerHTML}
     function renderResult(data){if(state.lastStatus==="complete")return;show("resultView");$("winner").textContent=`${data.winner} wins`;$("resultDrawings").innerHTML=data.drawings.map((image,index)=>`<div class="submission"><img src="${image}" alt="Drawing by ${escapeHtml(data.artists[index])}"><span>${escapeHtml(data.artists[index])}${data.artists[index]===data.winner?" · Winner":""}</span></div>`).join("")}
-    function resetSession(){clearInterval(state.poll);sessionStorage.removeItem("drawmatchPlayer");state.playerId=null;state.lastStatus=null;show("joinView")}
+    function resetSession(){clearInterval(state.poll);clearInterval(musicSyncTimer);cancelAnimationFrame(state.animation);if(musicPlayer)musicPlayer.stopVideo();sessionStorage.removeItem("drawmatchPlayer");state.playerId=null;state.lastStatus=null;show("joinView")}
     $("artistRole").onclick=()=>role("artist");$("judgeRole").onclick=()=>role("judge");
     $("promptedMode").onclick=()=>mode("prompted");$("promptlessMode").onclick=()=>mode("promptless");
+    $("speedpaintMode").onclick=()=>mode("speedpaint");
     $("twoArtists").onclick=()=>artistCount(2);$("fourArtists").onclick=()=>artistCount(4);
     $("publicMatch").onclick=()=>matchType("public");$("privateMatch").onclick=()=>matchType("private");
     async function enterMatch(path,body){$("joinButton").disabled=true;$("joinRoom").disabled=true;$("createRoom").disabled=true;$("joinError").textContent="";try{const data=await api(path,body);state.playerId=data.player_id;sessionStorage.setItem("drawmatchPlayer",state.playerId);startPolling()}catch(error){$("joinError").textContent=error.message}finally{$("joinButton").disabled=false;$("joinRoom").disabled=false;$("createRoom").disabled=false}}
     $("joinForm").onsubmit=event=>{event.preventDefault();const name=$("name").value;if(state.matchType==="private")enterMatch("/api/room/join",{name,role:state.role,room_code:$("roomCode").value});else enterMatch("/api/join",{name,role:state.role,mode:state.mode,artist_count:state.artistCount})};
     $("createRoom").onclick=()=>enterMatch("/api/room/create",{name:$("name").value,role:state.role,mode:state.mode,artist_count:state.artistCount});
+    $("songForm").onsubmit=event=>{event.preventDefault();chooseSong($("songInput").value)};
     $("leaveButton").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
-    canvas.onpointerdown=event=>{canvas.setPointerCapture(event.pointerId);state.stroke={color:$("color").value,size:Number($("size").value),points:[point(event)]};state.strokes.push(state.stroke)};canvas.onpointermove=event=>{if(!state.stroke)return;state.stroke.points.push(point(event));redraw()};canvas.onpointerup=canvas.onpointercancel=()=>state.stroke=null;
+    canvas.onpointerdown=event=>{canvas.setPointerCapture(event.pointerId);state.stroke={color:$("color").value,size:Number($("size").value),points:[{...point(event),bornAt:performance.now()}]};state.strokes.push(state.stroke);redraw()};canvas.onpointermove=event=>{if(!state.stroke)return;state.stroke.points.push({...point(event),bornAt:performance.now()});redraw()};canvas.onpointerup=canvas.onpointercancel=()=>state.stroke=null;
     $("undo").onclick=()=>{state.strokes.pop();redraw()};$("clear").onclick=()=>{state.strokes=[];redraw()};$("saveArtwork").onclick=saveArtwork;
-    $("submit").onclick=async()=>{$("submit").disabled=true;try{await api("/api/submit",{player_id:state.playerId,drawing:canvas.toDataURL("image/png")});state.submitted=true;poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
+    $("musicToggle").onclick=()=>{if(!musicReady)return;if(musicPlayer.isMuted()){$("musicToggle").textContent="Mute";musicPlayer.unMute();syncMusic();musicPlayer.playVideo()}else{$("musicToggle").textContent="Turn sound on";musicPlayer.mute()}};
+    $("submit").onclick=async()=>{$("submit").disabled=true;try{await api("/api/submit",{player_id:state.playerId,drawing:drawingData()});state.submitted=true;poll()}catch(error){alert(error.message)}finally{$("submit").disabled=false}};
     $("requeue").onclick=async()=>{state.lastStatus=null;await api("/api/requeue",{player_id:state.playerId});poll()};$("leaveMatch").onclick=async()=>{await api("/api/leave",{player_id:state.playerId});resetSession()};
     redraw();updateOnlineCount();setInterval(updateOnlineCount,5000);if(state.playerId)startPolling();
   </script>

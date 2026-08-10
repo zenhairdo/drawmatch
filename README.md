@@ -11,6 +11,23 @@ python3 server.py
 
 Open `http://localhost:8000` in three separate browsers or private windows.
 
+## Speedpaint music
+
+Speedpaint matches always use two artists and one judge. Each visible stroke
+fades after three seconds, while the complete drawing is preserved for judging.
+
+Set `YOUTUBE_TRACKS` to one or more comma-separated, embeddable YouTube video
+IDs before starting the server:
+
+```bash
+YOUTUBE_TRACKS="video_id_one,video_id_two" python3 server.py
+```
+
+After matchmaking, the judge chooses one of these playlist tracks or pastes any
+valid YouTube URL/video ID. That choice starts the round. Artist clients seek to
+the shared round-start offset and resynchronize every five seconds. Playback
+starts muted to satisfy browser autoplay rules; each artist can turn sound on.
+
 ## Deploy on Render
 
 This repository includes `render.yaml` for a free Render web service. Push the
