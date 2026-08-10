@@ -59,7 +59,9 @@ the challenger's new song and receives 60 seconds of protection before another
 challenge can begin.
 
 Like matchmaking, stage sessions and votes are held in memory and reset when
-the server restarts.
+the server restarts. Closing a stage tab sends an immediate leave signal; a
+15-second heartbeat timeout removes disconnected performers, challengers, and
+viewers if that signal cannot be delivered.
 
 ## Deploy on Render
 
