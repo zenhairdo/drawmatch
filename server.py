@@ -26,6 +26,7 @@ STAGE_BATTLE_SECONDS = 60
 STAGE_SONG_PHASE_SECONDS = 30
 STAGE_VOTE_SECONDS = 15
 STAGE_WINNER_COOLDOWN_SECONDS = 60
+STAGE_ONLINE_TIMEOUT_SECONDS = 15
 ONLINE_TIMEOUT_SECONDS = 15
 MAX_BODY_BYTES = 6 * 1024 * 1024
 ROOT = Path(__file__).resolve().parent
@@ -516,6 +517,7 @@ class StageStore:
     def join(self, name: str) -> dict:
         name = GameStore._clean_name(name)
         with self.lock:
+            self._expire()
             if any(player["name"].casefold() == name.casefold() for player in self.players.values()):
                 raise ValueError("That stage name is already in use.")
             player_id = secrets.token_urlsafe(18)
@@ -524,9 +526,9 @@ class StageStore:
 
     def state_for(self, player_id: str) -> dict:
         with self.lock:
-            self._expire()
             player = self._player(player_id)
             player["last_seen"] = time.time()
+            self._expire(active_player_id=player_id)
             stage = self.stage
             response = {
                 "status": stage["status"],
@@ -652,25 +654,39 @@ class StageStore:
     def leave(self, player_id: str) -> None:
         with self.lock:
             self._player(player_id)
-            stage = self.stage
-            if player_id == stage["performer"]:
-                self.stage = self._empty_stage()
-            elif player_id == stage["challenger"]:
-                now = time.time()
-                stage.update(
-                    status="live",
-                    challenger=None,
-                    song_id=stage["old_song_id"],
-                    song_started_at=now,
-                    cooldown_until=now,
-                    votes={},
-                )
-                stage["live_drawings"].pop(player_id, None)
-            self.players.pop(player_id, None)
+            self._remove_player(player_id)
 
-    def _expire(self) -> None:
+    def _remove_player(self, player_id: str) -> None:
+        stage = self.stage
+        if player_id == stage["performer"]:
+            self.stage = self._empty_stage()
+        elif player_id == stage["challenger"]:
+            now = time.time()
+            stage.update(
+                status="live",
+                challenger=None,
+                song_id=stage["old_song_id"],
+                song_started_at=now,
+                cooldown_until=now,
+                votes={},
+            )
+            stage["live_drawings"].pop(player_id, None)
+        else:
+            stage["votes"].pop(player_id, None)
+        self.players.pop(player_id, None)
+
+    def _expire(self, active_player_id: str | None = None) -> None:
         stage = self.stage
         now = time.time()
+        cutoff = now - STAGE_ONLINE_TIMEOUT_SECONDS
+        stale_players = [
+            player_id
+            for player_id, player in self.players.items()
+            if player_id != active_player_id and player["last_seen"] < cutoff
+        ]
+        for player_id in stale_players:
+            self._remove_player(player_id)
+        stage = self.stage
         if stage["status"] == "battle" and now >= stage["battle_deadline"]:
             stage["status"] = "voting"
             stage["vote_deadline"] = now + STAGE_VOTE_SECONDS
