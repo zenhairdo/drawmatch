@@ -631,9 +631,10 @@ class StageStore:
             self._player(player_id)
             stage = self.stage
             allowed = player_id == stage["performer"] or (
-                stage["status"] == "battle" and player_id == stage["challenger"]
+                stage["status"] in {"battle", "voting"}
+                and player_id == stage["challenger"]
             )
-            if stage["status"] not in {"live", "battle"} or not allowed:
+            if stage["status"] not in {"live", "battle", "voting"} or not allowed:
                 raise ValueError("Only a current stage artist can publish a drawing.")
             stage["live_drawings"][player_id] = drawing
 
@@ -700,7 +701,7 @@ class StageStore:
                 performer=winner,
                 challenger=None,
                 song_id=stage["new_song_id"],
-                song_started_at=now,
+                song_started_at=stage["battle_started_at"] + STAGE_SONG_PHASE_SECONDS,
                 cooldown_until=now + STAGE_WINNER_COOLDOWN_SECONDS,
                 live_drawings={winner: winning_drawing} if winning_drawing else {},
                 votes={},
