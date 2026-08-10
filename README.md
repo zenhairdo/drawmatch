@@ -13,8 +13,9 @@ Open `http://localhost:8000` in three separate browsers or private windows.
 
 ## Speedpaint music
 
-Speedpaint matches always use two artists and one judge. Each visible stroke
-fades after three seconds, while the complete drawing is preserved for judging.
+Speedpaint matches always use two artists and one judge. Each visible line
+segment remains fully visible for three seconds, then the oldest segments are
+removed first while the complete drawing is preserved for judging.
 
 Set `YOUTUBE_TRACKS` to one or more comma-separated, embeddable YouTube video
 IDs before starting the server:
@@ -32,11 +33,12 @@ appears so playback can be unlocked with one user gesture.
 During the round, each artist publishes a compressed preview about four times
 per second. The judge sees both anonymous canvases in contestant order, polls
 for updates every 300 milliseconds, and hears the same timestamp-synchronized
-track. The final archived drawings remain separate from these fading live views.
+track. The final archived drawings remain separate from these expiring live views.
 
 The home screen has two one-browser previews:
 
-- **Watch bot speedpaint** runs fading strokes with optional YouTube music.
+- **Watch bot speedpaint** removes the oldest segments after three seconds and
+  supports optional YouTube music.
 - **Watch bot drawing match** shows two bots building persistent paintings.
 
 Both demos generate random live paint for 30 seconds and then continue to the
